@@ -416,7 +416,7 @@ export default function PastePage() {
     if (ok) {
       toast.success("Link copied to clipboard");
       setCopiedLink(true);
-      setTimeout(() => setCopiedLink(false), 900);
+      setTimeout(() => setCopiedLink(false), 1600);
     } else {
       toast.error("Could not copy link");
     }
@@ -427,7 +427,7 @@ export default function PastePage() {
     if (ok) {
       toast.success("Content copied to clipboard");
       setCopiedContent(true);
-      setTimeout(() => setCopiedContent(false), 900);
+      setTimeout(() => setCopiedContent(false), 1600);
     } else {
       toast.error("Could not copy content");
     }

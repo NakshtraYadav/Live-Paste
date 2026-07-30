@@ -1,26 +1,26 @@
 [
   {
     "content": "Backend: GridFS image endpoints (upload 100MB max, stream download, delete, expiry cleanup)",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "Backend: verify large upload works through ingress (curl 10MB + 60MB)",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Frontend: paste/drag-drop/upload button -> insert inline markdown reference at cursor",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Frontend: attachments preview strip (view, copy URL, delete) derived from inline refs",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Frontend: line numbers gutter + no-wrap editor + lines/chars status bar",
-    "status": "pending"
+    "status": "completed"
   },
   {
-    "content": "Test end to end with testing agent",
-    "status": "pending"
+    "content": "Test end to end with testing agent (iteration_2: 100% pass)",
+    "status": "completed"
   }
 ]
