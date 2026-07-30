@@ -1,38 +1,26 @@
 [
   {
-    "content": "Phase 1: Implement minimal backend (REST + WS /api/ws/{slug}) with Mongo persistence",
-    "status": "completed"
+    "content": "Backend: GridFS image endpoints (upload 100MB max, stream download, delete, expiry cleanup)",
+    "status": "in_progress"
   },
   {
-    "content": "Phase 1: Write single POC test script (external wss connectivity, broadcast, persistence)",
-    "status": "completed"
+    "content": "Backend: verify large upload works through ingress (curl 10MB + 60MB)",
+    "status": "pending"
   },
   {
-    "content": "Phase 1: Run POC and fix until passing (13/13 passed)",
-    "status": "completed"
+    "content": "Frontend: paste/drag-drop/upload button -> insert inline markdown reference at cursor",
+    "status": "pending"
   },
   {
-    "content": "Phase 2: Get design guidelines from design_agent",
-    "status": "completed"
+    "content": "Frontend: attachments preview strip (view, copy URL, delete) derived from inline refs",
+    "status": "pending"
   },
   {
-    "content": "Phase 2: Build full backend (create paste, slugs, expiry, views)",
-    "status": "completed"
+    "content": "Frontend: line numbers gutter + no-wrap editor + lines/chars status bar",
+    "status": "pending"
   },
   {
-    "content": "Phase 2: Build full frontend (create page, live editor, syntax highlighting, copy buttons, dark mode, viewer count)",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 2: All user stories covered in development",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 2: End to End Testing using Testing Agent (100% pass)",
-    "status": "completed"
-  },
-  {
-    "content": "Fix all issues found in testing (none found)",
-    "status": "completed"
+    "content": "Test end to end with testing agent",
+    "status": "pending"
   }
 ]

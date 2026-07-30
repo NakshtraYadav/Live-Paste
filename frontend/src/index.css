@@ -110,6 +110,7 @@
 /* ---------- Code editor ---------- */
 .lp-editor-wrap {
   min-height: 100%;
+  min-width: max-content;
 }
 
 .lp-editor-wrap textarea {
@@ -122,12 +123,27 @@
   font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
   font-size: 13.5px !important;
   line-height: 1.65 !important;
+  white-space: pre !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+}
+
+/* Line numbers gutter — metrics must match the editor exactly */
+.lp-gutter {
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13.5px;
+  line-height: 1.65;
+  padding: 20px 10px 20px 14px;
+  min-width: 52px;
 }
 
 @media (min-width: 640px) {
   .lp-editor-wrap textarea,
   .lp-editor-wrap pre {
     font-size: 14px !important;
+  }
+  .lp-gutter {
+    font-size: 14px;
   }
 }
 

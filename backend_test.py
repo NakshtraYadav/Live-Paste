@@ -9,6 +9,8 @@ import time
 import asyncio
 import websockets
 from datetime import datetime
+from io import BytesIO
+from PIL import Image
 
 BASE_URL = "https://livepaste.preview.emergentagent.com"
 WS_URL = "wss://livepaste.preview.emergentagent.com"
@@ -334,6 +336,143 @@ async def test_websocket_nonexistent_slug():
     except Exception as e:
         results.record_fail("WebSocket non-existent slug", str(e))
 
+def create_test_image():
+    """Create a small test PNG image in memory"""
+    img = Image.new('RGB', (100, 100), color='red')
+    buf = BytesIO()
+    img.save(buf, format='PNG')
+    buf.seek(0)
+    return buf
+
+def test_upload_image(slug):
+    """Test POST /api/paste/{slug}/image with valid PNG"""
+    try:
+        img_buf = create_test_image()
+        files = {'file': ('test.png', img_buf, 'image/png')}
+        
+        resp = requests.post(f"{BASE_URL}/api/paste/{slug}/image", files=files, timeout=30)
+        
+        if resp.status_code != 200:
+            results.record_fail("Upload image (valid PNG)", f"Expected 200, got {resp.status_code}: {resp.text}")
+            return None
+        
+        data = resp.json()
+        required_fields = ["id", "url", "name", "size", "contentType"]
+        missing = [f for f in required_fields if f not in data]
+        
+        if missing:
+            results.record_fail("Upload image (valid PNG)", f"Missing fields: {missing}")
+            return None
+        
+        if not data["id"] or len(data["id"]) != 24:
+            results.record_fail("Upload image (valid PNG)", f"Invalid image ID: {data['id']}")
+            return None
+        
+        if data["contentType"] != "image/png":
+            results.record_fail("Upload image (valid PNG)", f"Wrong content type: {data['contentType']}")
+            return None
+        
+        results.record_pass("Upload image (valid PNG)")
+        return data["id"]
+    except Exception as e:
+        results.record_fail("Upload image (valid PNG)", str(e))
+        return None
+
+def test_get_image(image_id):
+    """Test GET /api/image/{id}"""
+    try:
+        resp = requests.get(f"{BASE_URL}/api/image/{image_id}", timeout=10)
+        
+        if resp.status_code != 200:
+            results.record_fail("Get image", f"Expected 200, got {resp.status_code}")
+            return False
+        
+        if not resp.content or len(resp.content) == 0:
+            results.record_fail("Get image", "Empty response body")
+            return False
+        
+        content_type = resp.headers.get('Content-Type', '')
+        if not content_type.startswith('image/'):
+            results.record_fail("Get image", f"Wrong content type: {content_type}")
+            return False
+        
+        results.record_pass("Get image")
+        return True
+    except Exception as e:
+        results.record_fail("Get image", str(e))
+        return False
+
+def test_upload_non_image(slug):
+    """Test POST /api/paste/{slug}/image with non-image content (should return 400)"""
+    try:
+        files = {'file': ('test.txt', BytesIO(b'not an image'), 'text/plain')}
+        resp = requests.post(f"{BASE_URL}/api/paste/{slug}/image", files=files, timeout=10)
+        
+        if resp.status_code == 400:
+            results.record_pass("Upload non-image file (400)")
+        else:
+            results.record_fail("Upload non-image file (400)", f"Expected 400, got {resp.status_code}")
+    except Exception as e:
+        results.record_fail("Upload non-image file (400)", str(e))
+
+def test_upload_image_nonexistent_slug():
+    """Test POST /api/paste/{slug}/image to non-existent slug (should return 404)"""
+    try:
+        img_buf = create_test_image()
+        files = {'file': ('test.png', img_buf, 'image/png')}
+        resp = requests.post(f"{BASE_URL}/api/paste/doesnotexist999/image", files=files, timeout=10)
+        
+        if resp.status_code == 404:
+            results.record_pass("Upload image to non-existent slug (404)")
+        else:
+            results.record_fail("Upload image to non-existent slug (404)", f"Expected 404, got {resp.status_code}")
+    except Exception as e:
+        results.record_fail("Upload image to non-existent slug (404)", str(e))
+
+def test_delete_image(image_id):
+    """Test DELETE /api/image/{id}"""
+    try:
+        resp = requests.delete(f"{BASE_URL}/api/image/{image_id}", timeout=10)
+        
+        if resp.status_code != 200:
+            results.record_fail("Delete image", f"Expected 200, got {resp.status_code}")
+            return False
+        
+        data = resp.json()
+        if not data.get("ok"):
+            results.record_fail("Delete image", f"Expected ok:true, got: {data}")
+            return False
+        
+        results.record_pass("Delete image")
+        return True
+    except Exception as e:
+        results.record_fail("Delete image", str(e))
+        return False
+
+def test_get_deleted_image(image_id):
+    """Test GET /api/image/{id} after deletion (should return 404)"""
+    try:
+        resp = requests.get(f"{BASE_URL}/api/image/{image_id}", timeout=10)
+        
+        if resp.status_code == 404:
+            results.record_pass("Get deleted image (404)")
+        else:
+            results.record_fail("Get deleted image (404)", f"Expected 404, got {resp.status_code}")
+    except Exception as e:
+        results.record_fail("Get deleted image (404)", str(e))
+
+def test_get_invalid_image_id():
+    """Test GET /api/image/{invalid-id} (should return 404)"""
+    try:
+        resp = requests.get(f"{BASE_URL}/api/image/invalidid123", timeout=10)
+        
+        if resp.status_code == 404:
+            results.record_pass("Get invalid image ID (404)")
+        else:
+            results.record_fail("Get invalid image ID (404)", f"Expected 404, got {resp.status_code}")
+    except Exception as e:
+        results.record_fail("Get invalid image ID (404)", str(e))
+
 def main():
     print("="*60)
     print("LivePaste Backend API & WebSocket Tests")
@@ -367,6 +506,35 @@ def main():
     # Test 7: Get non-existent paste
     test_get_nonexistent_paste()
     
+    # Image API Tests
+    print("\n--- Image API Tests ---\n")
+    
+    # Create a paste for image tests
+    image_test_slug = test_create_paste_custom_slug()
+    
+    if image_test_slug:
+        # Test 8: Upload valid image
+        image_id = test_upload_image(image_test_slug)
+        
+        # Test 9: Get uploaded image
+        if image_id:
+            test_get_image(image_id)
+        
+        # Test 10: Upload non-image file (should fail with 400)
+        test_upload_non_image(image_test_slug)
+        
+        # Test 11: Delete image
+        if image_id:
+            test_delete_image(image_id)
+            # Test 12: Get deleted image (should return 404)
+            test_get_deleted_image(image_id)
+    
+    # Test 13: Upload to non-existent slug
+    test_upload_image_nonexistent_slug()
+    
+    # Test 14: Get invalid image ID
+    test_get_invalid_image_id()
+    
     # WebSocket Tests
     print("\n--- WebSocket Tests ---\n")
     
@@ -374,13 +542,13 @@ def main():
     ws_test_slug = test_create_paste_custom_slug()
     
     if ws_test_slug:
-        # Test 8: WebSocket connection
+        # Test 15: WebSocket connection
         asyncio.run(test_websocket_connection(ws_test_slug))
         
-        # Test 9: Real-time sync between 2 clients
+        # Test 16: Real-time sync between 2 clients
         asyncio.run(test_websocket_realtime_sync(ws_test_slug))
     
-    # Test 10: WebSocket to non-existent slug
+    # Test 17: WebSocket to non-existent slug
     asyncio.run(test_websocket_nonexistent_slug())
     
     # Print summary

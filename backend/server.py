@@ -1,7 +1,9 @@
-from fastapi import FastAPI, APIRouter, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, APIRouter, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorGridFSBucket
+from bson import ObjectId
 import os
 import re
 import json
@@ -21,6 +23,7 @@ load_dotenv(ROOT_DIR / '.env')
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
+images_bucket = AsyncIOMotorGridFSBucket(db, bucket_name="images")
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -33,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 # ---------------- Constants ----------------
 MAX_CONTENT_SIZE = 400_000  # ~400KB max paste size
+MAX_IMAGE_SIZE = 100 * 1024 * 1024  # 100MB max per image
 RESERVED_SLUGS = {"api", "ws", "static", "assets", "favicon.ico", "robots.txt", "index.html", "manifest.json", "new", "about"}
 SLUG_RE = re.compile(r"^[a-zA-Z0-9_-]{3,64}$")
 EXPIRY_MAP = {
@@ -81,10 +85,24 @@ def is_expired(doc: dict) -> bool:
     return exp < now_utc()
 
 
+async def purge_paste_images(slug: str):
+    """Delete all GridFS images attached to a paste."""
+    try:
+        cursor = images_bucket.find({"metadata.slug": slug})
+        async for f in cursor:
+            try:
+                await images_bucket.delete(f._id)
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning(f"Image purge failed for {slug}: {e}")
+
+
 async def get_paste_doc(slug: str):
     doc = await db.pastes.find_one({"slug": slug})
     if doc and is_expired(doc):
         await db.pastes.delete_one({"slug": slug})
+        await purge_paste_images(slug)
         return None
     return doc
 
@@ -156,6 +174,101 @@ async def get_paste(slug: str, count_view: bool = False):
         await db.pastes.update_one({"slug": slug}, {"$inc": {"views": 1}})
         doc["views"] = doc.get("views", 0) + 1
     return serialize_paste(doc)
+
+
+# ---------------- Image endpoints (GridFS) ----------------
+@api_router.post("/paste/{slug}/image")
+async def upload_image(slug: str, file: UploadFile = File(...)):
+    doc = await get_paste_doc(slug)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Paste not found or expired")
+
+    content_type = file.content_type or ""
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image files are allowed")
+
+    filename = file.filename or "image"
+    grid_in = images_bucket.open_upload_stream(
+        filename,
+        metadata={
+            "slug": slug,
+            "contentType": content_type,
+            "uploadedAt": now_utc().isoformat(),
+        },
+    )
+    size = 0
+    try:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > MAX_IMAGE_SIZE:
+                await grid_in.abort()
+                raise HTTPException(status_code=413, detail="Image too large (max 100MB)")
+            await grid_in.write(chunk)
+        await grid_in.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await grid_in.abort()
+        except Exception:
+            pass
+        logger.error(f"Image upload failed for {slug}: {e}")
+        raise HTTPException(status_code=500, detail="Image upload failed, please try again")
+
+    image_id = str(grid_in._id)
+    return {
+        "id": image_id,
+        "url": f"/api/image/{image_id}",
+        "name": filename,
+        "size": size,
+        "contentType": content_type,
+    }
+
+
+@api_router.get("/image/{image_id}")
+async def get_image(image_id: str):
+    try:
+        oid = ObjectId(image_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Image not found")
+    try:
+        stream = await images_bucket.open_download_stream(oid)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    content_type = (stream.metadata or {}).get("contentType", "application/octet-stream")
+
+    async def iterator():
+        while True:
+            chunk = await stream.readchunk()
+            if not chunk:
+                break
+            yield chunk
+
+    return StreamingResponse(
+        iterator(),
+        media_type=content_type,
+        headers={
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "Content-Length": str(stream.length),
+        },
+    )
+
+
+@api_router.delete("/image/{image_id}")
+async def delete_image(image_id: str):
+    try:
+        oid = ObjectId(image_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Image not found")
+    try:
+        await images_bucket.delete(oid)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Image not found")
+    return {"ok": True}
 
 
 # ---------------- WebSocket room manager ----------------
