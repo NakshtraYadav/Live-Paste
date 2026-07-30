@@ -1,13 +1,20 @@
-# plan.md
+# plan.md (Updated)
 
 ## 1. Objectives
-- Deliver an anonymous, real-time collaborative “live paste” app (dontpad-style) on FastAPI + React + MongoDB.
-- Core workflow: open a shared link → edit text → all connected clients see updates instantly via WebSockets routed through `/api/ws/{slug}`.
-- Support random IDs by default + optional custom slug, optional expiry (1h/1d/1w/never), syntax highlighting for common languages, copy content/link, view count, dark mode.
+- Deliver an anonymous, real-time collaborative “live paste” app (dontpad-style) on **FastAPI + React + MongoDB**.
+- Core workflow: open a shared link → edit text/code → all connected clients see updates instantly via **WebSockets** routed through **`/api/ws/{slug}`**.
+- Support:
+  - **Random IDs by default** + **optional custom slug**
+  - **Optional expiry** (1h/1d/1w/never) with server enforcement + cleanup
+  - **Syntax highlighting** (Prism) for many languages (Python, NodeJS/JS, TS, etc.)
+  - **Copy link** + **copy content**
+  - **Live viewer count** + **total view count**
+  - **Dark mode toggle** persisted to localStorage
+- Status: **V1 shipped and tested (backend + frontend + real-time sync).**
 
 ## 2. Implementation Steps
 
-### Phase 1 — Core WebSocket + Persistence POC (isolation; do not proceed until stable)
+### Phase 1 — Core WebSocket + Persistence POC (isolation; do not proceed until stable) ✅ COMPLETE
 **User stories**
 1. As a user, I can connect to a paste’s WebSocket endpoint through the public preview URL and stay connected.
 2. As a user, when I send an edit event, all other connected clients receive it within ~1s.
@@ -15,21 +22,22 @@
 4. As a user, I can join/leave and see an accurate active-connection count.
 5. As a developer, I can run a Python script to prove external `wss://.../api/ws/{slug}` connectivity via ingress.
 
-**Steps**
-- Websearch best practices for FastAPI WebSockets behind ingress (timeouts, headers, ping/keepalive).
-- Implement minimal backend:
+**Implemented / Verified**
+- Backend endpoints proven behind ingress:
   - `GET /api/health`
+  - `POST /api/paste` (random slug by default, optional custom slug)
   - `GET /api/paste/{slug}` (load from Mongo)
-  - `POST /api/paste` (create: random code + optional custom slug, expiry)
-  - `WS /api/ws/{slug}`: broadcast to room, send current doc on join, track connections, persist updates (debounced server-side).
-- Data model (Mongo): `{ slug, content, language, createdAt, updatedAt, expiresAt?, views }`.
-- Expiry POC: on read/join, if `expiresAt < now` treat as expired; optionally add TTL index later.
-- Write `scripts/ws_poc_test.py`:
-  - Connect 2+ clients to external `wss://<preview>/api/ws/testslug`.
-  - Client A sends edits; assert client B receives; assert reconnect loads latest from REST.
-- Iterate until: stable WS through ingress (no 404/upgrade issues), broadcast works, persistence verified.
+  - `WS /api/ws/{slug}` room broadcast with presence
+- POC test script created and run: `scripts/ws_poc_test.py`
+  - External `wss://livepaste.preview.emergentagent.com/api/ws/{slug}` connectivity verified
+  - Broadcast edits between multiple clients verified
+  - Presence/viewer count messages verified
+  - Mongo persistence verified via REST reload
+  - Custom/duplicate/invalid slug validation verified
+  - Non-existent slug WS returns `{type:'error', code:'not_found'}` then closes
+- Result: **13/13 checks passed**.
 
-### Phase 2 — V1 App Development (build around proven core)
+### Phase 2 — V1 App Development (build around proven core) ✅ COMPLETE
 **User stories**
 1. As a user, I can create a new paste with optional custom slug, expiry, and language, and get a shareable link.
 2. As a user, visiting a paste link opens a live editor where everyone with the link can edit.
@@ -37,34 +45,57 @@
 4. As a user, I can copy the paste content and copy the share link with one click.
 5. As a user, I can see live viewers and total view count, and use dark mode.
 
-**Backend**
-- Finalize REST:
-  - `POST /api/paste` validates slug uniqueness; returns canonical URL.
-  - `GET /api/paste/{slug}` increments view count (once per session/localStorage marker).
-- WebSocket protocol (JSON):
-  - `join` → server replies `{type:'init', content, language, viewers}`.
-  - `edit` → `{type:'edit', content, version?, updatedAt}` broadcast (last-write-wins MVP).
-  - `presence` updates viewer count.
-- Expiry: enforce on REST + WS join; return `410 Gone`/`expired` message.
+**Backend (Implemented)**
+- REST
+  - `POST /api/paste`
+    - Random slug by default; optional `customSlug`
+    - Reserved slug protection (e.g., `api`, etc.)
+    - Expiry options: `1h | 1d | 1w | never`
+    - Size cap: **400KB**
+  - `GET /api/paste/{slug}`
+    - Returns persisted content/language
+    - Optional view counting (`count_view=true`) increments `views`
+- WebSocket `WS /api/ws/{slug}`
+  - Message types: `init | edit | language | presence | error | ping/pong`
+  - Room broadcast for collaborative editing (anyone with link can edit)
+  - Presence tracking per slug (live viewer count)
+  - Persistence on edit (last-write-wins MVP)
+- Expiry
+  - Enforced on REST + WS join
+  - **Mongo TTL index** on `expiresAt` + **lazy cleanup** on read/join
+- Data model includes: `slug, content, language, views, createdAt, updatedAt, expiresAt, rev`
 
-**Frontend (React)**
-- Routes:
-  - `/` create page.
-  - `/:slug` live editor page.
-- Editor:
-  - `react-simple-code-editor` + `prismjs` (load common languages: markup, css, clike, javascript, typescript, python, go, java, cpp, bash, json, yaml, markdown, sql).
-  - Debounce outgoing edits (e.g., 150–300ms) + show connection status.
-- UI features:
-  - Copy content button + copy link button.
-  - Viewer count (live) + view count.
-  - Dark mode toggle (persist to localStorage).
-  - Expiry selector on create + display remaining time when applicable.
-- Use design agent for polished layout (minimal, fast, readable typography).
+**Frontend (Implemented)**
+- App name/UI: **LivePaste** (design system defined in `design_guidelines.md`)
+- Pages
+  - `/` Home page
+    - Hero + create form (textarea, custom slug, language select, expiry select)
+    - “How it works” section
+  - `/:slug` Paste page
+    - Full-screen live editor using `react-simple-code-editor` + Prism highlighting
+    - Sticky toolbar with:
+      - Slug/link display
+      - Copy link + copy content buttons
+      - Language selector (23 languages)
+      - Live viewer count + total views
+      - Connection status pill
+      - Expiry countdown badge
+      - Dark/light theme toggle (persisted)
+    - Loading + Not-found/Expired states
+- Real-time behavior
+  - Debounced outgoing edits (~250ms)
+  - Auto-reconnect with backoff
+  - Keepalive pings
+- Testing hooks
+  - `data-testid` attributes added across key UI elements
 
-**End Phase 2**
-- Run one full E2E pass with testing agent: create → share → two tabs edit sync → refresh persistence → expiry behavior → copy buttons → dark mode.
+**End Phase 2 Validation (Complete)**
+- Testing agent `iteration_1`: **100% pass**
+  - Backend: **16/16 tests passed**
+  - Frontend: all key flows passed, including **critical 2-tab real-time sync (~1.5s) and bidirectional editing**
+  - No open bugs
 
-### Phase 3 — Hardening + Feature Additions (production-friendly modularization)
+### Phase 3 — Hardening + Production Readiness (optional, future) ⏳ NOT STARTED (No open issues)
 **User stories**
 1. As a user, I can safely edit in multiple tabs without the app becoming laggy or losing content.
 2. As a user, I can recover gracefully if my connection drops (auto-reconnect + re-init).
@@ -72,31 +103,38 @@
 4. As a user, expired pastes clearly show an expired state and don’t allow edits.
 5. As an operator, old expired pastes are cleaned automatically.
 
-**Steps**
-- Add optimistic versioning (monotonic `rev`) to reduce overwrite surprises (still MVP).
-- Add server keepalive/ping + frontend auto-reconnect with backoff.
-- Add Mongo TTL index on `expiresAt` (where supported) + retain lazy-check guard.
-- Improve slug rules + reserved paths handling (`api`, `p`, etc.).
-- Performance: avoid broadcasting on no-op; cap max paste size (configurable) + show error.
+**Notes on current status**
+- Several hardening items are already partially implemented:
+  - `rev` is stored in Mongo
+  - Client auto-reconnect + keepalive pings exist
+  - TTL index + lazy expiry cleanup exist
+
+**Potential improvements (if/when needed)**
+- Add optimistic concurrency/version checks using `rev` (reduce overwrite surprises beyond last-write-wins).
+- Server-side debounce/coalescing of edits to reduce DB write frequency during heavy typing.
+- Better connection-state UX (explicit offline banner, retry button) and more robust ping/pong handling.
+- Rate limiting / abuse prevention (optional) and configurable max paste size.
+- Better view counting strategy (unique views via session/localStorage + backend safeguards).
 
 **End Phase 3**
-- Testing agent: concurrency (2–3 clients), reconnect, expiry cleanup, large paste, reserved slug errors.
+- Re-run testing agent with heavier concurrency (3+ clients), reconnect scenarios, large paste, expiry cleanup verification.
 
-### Phase 4 — Optional Enhancements (only after V1 is solid)
+### Phase 4 — Optional Enhancements (only if requested) ⏳ NOT STARTED
 **User stories**
-1. As a user, I can set a read-only mode link variant if I want to share without edits.
+1. As a user, I can generate a read-only link variant for sharing without edits.
 2. As a user, I can export/download as `.txt`/`.md`.
 3. As a user, I can see basic history (last N snapshots) and restore one.
 4. As a user, I can set a password on a paste (no accounts).
 5. As a user, I can search within the paste and jump to matches.
 
 ## 3. Next Actions
-1. Implement Phase 1 minimal backend endpoints + WS room broadcaster under `/api/ws/{slug}`.
-2. Add Mongo model + save/load.
-3. Create and run `ws_poc_test.py` against external preview URL; fix ingress/WS issues until stable.
-4. Only after Phase 1 passes, proceed to Phase 2 full React UI + end-to-end testing.
+1. ✅ No immediate engineering tasks required (V1 shipped and passes tests).
+2. If you want to continue:
+   - Decide which Phase 3 hardening items matter most (rev-based conflict handling vs. performance vs. abuse protections).
+   - Choose any Phase 4 enhancements (read-only links, export, history, password, search).
 
 ## 4. Success Criteria
-- POC: External `wss://<preview>/api/ws/{slug}` connects reliably; edits broadcast to all clients; latest content persists in Mongo and reloads correctly.
-- V1: Users can create/share a link, collaboratively edit with live updates, syntax highlighting works for common languages, copy content/link works, view + viewer counts display, dark mode works.
-- Reliability: Reconnect works, expired pastes block edits and show clear state, TTL/lazy expiry prevents stale data.
+- ✅ POC success: External `wss://<preview>/api/ws/{slug}` connects reliably; edits broadcast; persistence confirmed.
+- ✅ V1 success: Create/share a link; collaborative editing with live updates; syntax highlighting works across languages; copy link/content works; live viewer + view count; dark mode; expiry supported.
+- ✅ Reliability baseline: Auto-reconnect and keepalive; expired pastes show clear state and are cleaned via TTL/lazy checks.
+- Future (optional): Rev-based conflict handling, performance improvements, and additional sharing/export/security features.
