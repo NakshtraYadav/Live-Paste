@@ -1,0 +1,38 @@
+[
+  {
+    "content": "Phase 1: Implement minimal backend (REST + WS /api/ws/{slug}) with Mongo persistence",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 1: Write single POC test script (external wss connectivity, broadcast, persistence)",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 1: Run POC and fix until passing (13/13 passed)",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2: Get design guidelines from design_agent",
+    "status": "in_progress"
+  },
+  {
+    "content": "Phase 2: Build full backend (create paste, slugs, expiry, views)",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 2: Build full frontend (create page, live editor, syntax highlighting, copy buttons, dark mode, viewer count)",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 2: All user stories covered in development",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 2: End to End Testing using Testing Agent",
+    "status": "pending"
+  },
+  {
+    "content": "Fix all issues found in testing",
+    "status": "pending"
+  }
+]
