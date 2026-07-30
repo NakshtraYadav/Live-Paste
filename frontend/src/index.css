@@ -1,115 +1,270 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-body {
-    margin: 0;
-    font-family:
-        -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
-        "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
-        sans-serif;
+@layer base {
+  :root {
+    /* Light (paper + ink) */
+    --background: 36 33% 98%;
+    --foreground: 222 22% 12%;
+
+    --card: 36 33% 99%;
+    --card-foreground: 222 22% 12%;
+
+    --popover: 36 33% 99%;
+    --popover-foreground: 222 22% 12%;
+
+    --primary: 173 58% 34%;
+    --primary-foreground: 36 33% 98%;
+
+    --secondary: 38 45% 92%;
+    --secondary-foreground: 222 22% 12%;
+
+    --muted: 36 20% 94%;
+    --muted-foreground: 222 10% 40%;
+
+    --accent: 38 55% 88%;
+    --accent-foreground: 222 22% 12%;
+
+    --destructive: 12 85% 55%;
+    --destructive-foreground: 36 33% 98%;
+
+    --border: 222 12% 86%;
+    --input: 222 12% 86%;
+    --ring: 173 58% 34%;
+
+    --radius: 0.75rem;
+
+    /* Editor-specific */
+    --editor-bg: 36 33% 99%;
+    --editor-fg: 222 22% 12%;
+    --editor-gutter: 36 20% 94%;
+    --editor-caret: 173 58% 34%;
+  }
+
+  .dark {
+    --background: 210 14% 7%;
+    --foreground: 36 33% 96%;
+
+    --card: 210 14% 10%;
+    --card-foreground: 36 33% 96%;
+
+    --popover: 210 14% 10%;
+    --popover-foreground: 36 33% 96%;
+
+    --primary: 173 58% 45%;
+    --primary-foreground: 210 14% 7%;
+
+    --secondary: 210 12% 14%;
+    --secondary-foreground: 36 33% 96%;
+
+    --muted: 210 12% 14%;
+    --muted-foreground: 215 16% 72%;
+
+    --accent: 210 12% 18%;
+    --accent-foreground: 36 33% 96%;
+
+    --destructive: 12 85% 62%;
+    --destructive-foreground: 210 14% 7%;
+
+    --border: 215 14% 20%;
+    --input: 215 14% 20%;
+    --ring: 173 58% 45%;
+
+    --editor-bg: 210 14% 9%;
+    --editor-fg: 210 20% 92%;
+    --editor-gutter: 210 12% 14%;
+    --editor-caret: 173 58% 45%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+  }
+
+  code,
+  pre,
+  textarea.code-input,
+  .font-mono {
+    font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.25);
+  }
 }
 
-code {
-    font-family:
-        source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+/* ---------- Code editor ---------- */
+.lp-editor-wrap {
+  min-height: 100%;
 }
 
-@layer base {
-    :root {
-        --background: 0 0% 100%;
-        --foreground: 0 0% 3.9%;
-        --card: 0 0% 100%;
-        --card-foreground: 0 0% 3.9%;
-        --popover: 0 0% 100%;
-        --popover-foreground: 0 0% 3.9%;
-        --primary: 0 0% 9%;
-        --primary-foreground: 0 0% 98%;
-        --secondary: 0 0% 96.1%;
-        --secondary-foreground: 0 0% 9%;
-        --muted: 0 0% 96.1%;
-        --muted-foreground: 0 0% 45.1%;
-        --accent: 0 0% 96.1%;
-        --accent-foreground: 0 0% 9%;
-        --destructive: 0 84.2% 60.2%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 89.8%;
-        --input: 0 0% 89.8%;
-        --ring: 0 0% 3.9%;
-        --chart-1: 12 76% 61%;
-        --chart-2: 173 58% 39%;
-        --chart-3: 197 37% 24%;
-        --chart-4: 43 74% 66%;
-        --chart-5: 27 87% 67%;
-        --radius: 0.5rem;
-    }
-    .dark {
-        --background: 0 0% 3.9%;
-        --foreground: 0 0% 98%;
-        --card: 0 0% 3.9%;
-        --card-foreground: 0 0% 98%;
-        --popover: 0 0% 3.9%;
-        --popover-foreground: 0 0% 98%;
-        --primary: 0 0% 98%;
-        --primary-foreground: 0 0% 9%;
-        --secondary: 0 0% 14.9%;
-        --secondary-foreground: 0 0% 98%;
-        --muted: 0 0% 14.9%;
-        --muted-foreground: 0 0% 63.9%;
-        --accent: 0 0% 14.9%;
-        --accent-foreground: 0 0% 98%;
-        --destructive: 0 62.8% 30.6%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 14.9%;
-        --input: 0 0% 14.9%;
-        --ring: 0 0% 83.1%;
-        --chart-1: 220 70% 50%;
-        --chart-2: 160 60% 45%;
-        --chart-3: 30 80% 55%;
-        --chart-4: 280 65% 60%;
-        --chart-5: 340 75% 55%;
-    }
+.lp-editor-wrap textarea {
+  outline: none !important;
+  caret-color: hsl(var(--editor-caret));
 }
 
-@layer base {
-    * {
-        @apply border-border;
-    }
-    body {
-        @apply bg-background text-foreground;
-    }
+.lp-editor-wrap textarea,
+.lp-editor-wrap pre {
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-size: 13.5px !important;
+  line-height: 1.65 !important;
 }
 
-@layer base {
-    [data-debug-wrapper="true"] {
-        display: contents !important;
-    }
+@media (min-width: 640px) {
+  .lp-editor-wrap textarea,
+  .lp-editor-wrap pre {
+    font-size: 14px !important;
+  }
+}
 
-    [data-debug-wrapper="true"] > * {
-        margin-left: inherit;
-        margin-right: inherit;
-        margin-top: inherit;
-        margin-bottom: inherit;
-        padding-left: inherit;
-        padding-right: inherit;
-        padding-top: inherit;
-        padding-bottom: inherit;
-        column-gap: inherit;
-        row-gap: inherit;
-        gap: inherit;
-        border-left-width: inherit;
-        border-right-width: inherit;
-        border-top-width: inherit;
-        border-bottom-width: inherit;
-        border-left-style: inherit;
-        border-right-style: inherit;
-        border-top-style: inherit;
-        border-bottom-style: inherit;
-        border-left-color: inherit;
-        border-right-color: inherit;
-        border-top-color: inherit;
-        border-bottom-color: inherit;
-    }
+/* ---------- Prism token colors (light) ---------- */
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: #74808c;
+  font-style: italic;
+}
+.token.punctuation {
+  color: #45505a;
+}
+.token.property,
+.token.tag,
+.token.constant,
+.token.symbol,
+.token.deleted {
+  color: #ad4a2f;
+}
+.token.boolean,
+.token.number {
+  color: #b25b12;
+}
+.token.selector,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin,
+.token.inserted {
+  color: #1c7a5f;
+}
+.token.operator,
+.token.entity,
+.token.url,
+.language-css .token.string,
+.style .token.string {
+  color: #46605e;
+}
+.token.atrule,
+.token.attr-value,
+.token.keyword {
+  color: #1264a3;
+}
+.token.function,
+.token.class-name {
+  color: #8a6a16;
+}
+.token.regex,
+.token.important,
+.token.variable {
+  color: #a3542f;
+}
+
+/* ---------- Prism token colors (dark) ---------- */
+.dark .token.comment,
+.dark .token.prolog,
+.dark .token.doctype,
+.dark .token.cdata {
+  color: #7e8a97;
+}
+.dark .token.punctuation {
+  color: #c9d1d9;
+}
+.dark .token.property,
+.dark .token.tag,
+.dark .token.constant,
+.dark .token.symbol,
+.dark .token.deleted {
+  color: #ffa38a;
+}
+.dark .token.boolean,
+.dark .token.number {
+  color: #ffb38a;
+}
+.dark .token.selector,
+.dark .token.attr-name,
+.dark .token.string,
+.dark .token.char,
+.dark .token.builtin,
+.dark .token.inserted {
+  color: #a7d7c5;
+}
+.dark .token.operator,
+.dark .token.entity,
+.dark .token.url {
+  color: #9fb8c9;
+}
+.dark .token.atrule,
+.dark .token.attr-value,
+.dark .token.keyword {
+  color: #7cc7ff;
+}
+.dark .token.function,
+.dark .token.class-name {
+  color: #d8c59a;
+}
+.dark .token.regex,
+.dark .token.important,
+.dark .token.variable {
+  color: #ffb38a;
+}
+
+/* ---------- Micro-interactions ---------- */
+.lp-pulse {
+  animation: lp-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes lp-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-pulse {
+    animation: none;
+  }
+}
+
+/* Subtle scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.4);
 }

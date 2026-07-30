@@ -13,23 +13,23 @@
   },
   {
     "content": "Phase 2: Get design guidelines from design_agent",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "Phase 2: Build full backend (create paste, slugs, expiry, views)",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Phase 2: Build full frontend (create page, live editor, syntax highlighting, copy buttons, dark mode, viewer count)",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Phase 2: All user stories covered in development",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Phase 2: End to End Testing using Testing Agent",
-    "status": "pending"
+    "status": "in_progress"
   },
   {
     "content": "Fix all issues found in testing",
