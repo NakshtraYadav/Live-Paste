@@ -62,13 +62,21 @@ livepaste update
 
 **CLI reference:**
 
-| Command                              | Description                                   |
-| ------------------------------------ | --------------------------------------------- |
-| `livepaste start`                     | Start the server (LAN-accessible by default)  |
-| `livepaste start --port 9000`         | Use a custom port                             |
-| `livepaste start --data-dir ~/pastes` | Store data somewhere else                     |
-| `livepaste update`                    | Update to the latest version from GitHub      |
-| `livepaste version`                   | Show version + check for updates              |
+| Command                              | Description                                    |
+| ------------------------------------ | ---------------------------------------------- |
+| `livepaste start`                     | Start the server (LAN-accessible by default)   |
+| `livepaste start --port 9000`         | Use a custom port for this run                 |
+| `livepaste start --keep-data`         | Keep pastes between sessions for this run      |
+| `livepaste start --data-dir ~/pastes` | Store data somewhere else                      |
+| `livepaste config`                    | Show settings (port, data-dir, keep-data)      |
+| `livepaste config port 9000`          | Change the default port permanently            |
+| `livepaste config keep-data on`       | Make pastes persistent by default              |
+| `livepaste autostart enable`          | Start LivePaste automatically at login         |
+| `livepaste autostart disable`         | Remove the login service                       |
+| `livepaste update`                    | Update to the latest version from GitHub       |
+| `livepaste version`                   | Show version + check for updates               |
+
+**Temporary by design:** in local mode every session starts clean — when you stop the server (Ctrl+C), all pastes, links, and images are wiped. If it's ever force-closed, leftovers are cleared on the next startup. Prefer to keep your pastes? `livepaste config keep-data on`.
 
 ## Tech Stack
 

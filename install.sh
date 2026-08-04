@@ -120,6 +120,10 @@ printf "  %s✓%s Found %s\n" "$GREEN" "$RESET" "$($PY --version 2>&1)"
 # --- interactive choices ---
 PORT="$(ask "Which port should LivePaste use?" "8090")"
 [[ "$PORT" =~ ^[0-9]+$ ]] || fail "Port must be a number"
+INSTALL_DIR="$(ask "Where should LivePaste live?" "$HOME/.livepaste")"
+INSTALL_DIR="${INSTALL_DIR/#\~/$HOME}"
+APP_DIR="$INSTALL_DIR"
+VENV_DIR="$APP_DIR/venv"
 echo
 
 # --- steps ---
@@ -138,9 +142,11 @@ link_cli() {
       ln -sf "$VENV_DIR/bin/livepaste" "$dir/livepaste" && linked="$dir" && break
     fi
   done
+  mkdir -p "$(dirname "$CONFIG_FILE")"
   {
     echo "PORT=$PORT"
     echo "REPO=$REPO"
+    echo "DATA_DIR=$APP_DIR"
   } > "$CONFIG_FILE"
   [[ -n "$linked" ]]
 }
@@ -153,15 +159,24 @@ echo
 printf "  %s%s╭───────────────────────────────────────────────╮%s\n" "$TEAL" "$BOLD" "$RESET"
 printf "  %s%s│%s  %sLivePaste %s installed successfully!%s\n" "$TEAL" "$BOLD" "$RESET" "$GREEN" "${VERSION_INSTALLED:-}" "$RESET"
 printf "  %s%s│%s\n" "$TEAL" "$BOLD" "$RESET"
-printf "  %s%s│%s   Start:    %slivepaste start%s\n" "$TEAL" "$BOLD" "$RESET" "$BOLD" "$RESET"
-printf "  %s%s│%s   Update:   %slivepaste update%s\n" "$TEAL" "$BOLD" "$RESET" "$BOLD" "$RESET"
-printf "  %s%s│%s   Data:     ~/.livepaste\n" "$TEAL" "$BOLD" "$RESET"
+printf "  %s%s│%s   Start:      %slivepaste start%s\n" "$TEAL" "$BOLD" "$RESET" "$BOLD" "$RESET"
+printf "  %s%s│%s   Update:     %slivepaste update%s\n" "$TEAL" "$BOLD" "$RESET" "$BOLD" "$RESET"
+printf "  %s%s│%s   Settings:   %slivepaste config%s  %s(port, data-dir, ...)%s\n" "$TEAL" "$BOLD" "$RESET" "$BOLD" "$RESET" "$DIM" "$RESET"
+printf "  %s%s│%s   Location:   %s\n" "$TEAL" "$BOLD" "$RESET" "$APP_DIR"
 printf "  %s%s╰───────────────────────────────────────────────╯%s\n" "$TEAL" "$BOLD" "$RESET"
 
 if ! command -v livepaste >/dev/null 2>&1; then
   if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
     printf "\n  %s!%s Add this to your shell profile, then reopen the terminal:\n" "$YELLOW" "$RESET"
     printf "     %sexport PATH=\"\$HOME/.local/bin:\$PATH\"%s\n" "$BOLD" "$RESET"
+  fi
+fi
+echo
+
+if [[ "$INTERACTIVE" == "1" ]]; then
+  AUTOSTART="$(ask "Start LivePaste automatically when you log in?" "n")"
+  if [[ "$AUTOSTART" =~ ^[Yy] ]]; then
+    "$VENV_DIR/bin/livepaste" autostart enable || true
   fi
 fi
 

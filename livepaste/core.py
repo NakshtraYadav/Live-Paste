@@ -366,11 +366,24 @@ async def _cleanup_loop():
         await asyncio.sleep(600)  # every 10 minutes
 
 
+def _is_ephemeral() -> bool:
+    """Session mode: only honored in local (SQLite) mode, set by the CLI."""
+    from .storage import SQLiteStorage
+
+    return (
+        os.environ.get("LIVEPASTE_EPHEMERAL", "0") == "1"
+        and isinstance(storage, SQLiteStorage)
+    )
+
+
 @app.on_event("startup")
 async def on_startup():
     global storage, _cleanup_task
     storage = create_storage()
     await storage.startup()
+    if _is_ephemeral():
+        # Covers force-kill: clear anything left over from a previous session
+        await storage.purge_all()
     _cleanup_task = asyncio.create_task(_cleanup_loop())
 
 
@@ -379,4 +392,10 @@ async def on_shutdown():
     if _cleanup_task:
         _cleanup_task.cancel()
     if storage:
+        if _is_ephemeral():
+            # Peaceful exit: wipe this session's pastes and images
+            try:
+                await storage.purge_all()
+            except Exception as e:
+                logger.warning(f"Session cleanup on shutdown failed: {e}")
         await storage.shutdown()

@@ -184,6 +184,10 @@ class MongoStorage:
         # Mongo TTL index handles paste expiry; purge orphaned images lazily.
         return
 
+    async def purge_all(self):
+        # Never wipe hosted data — ephemeral mode is a local (SQLite) feature.
+        return
+
 
 # --------------------------------------------------------------------------
 # SQLite backend (local mode — no external database needed)
@@ -381,6 +385,26 @@ class SQLiteStorage:
             await self.delete_paste(slug)
         if slugs:
             logger.info(f"Purged {len(slugs)} expired paste(s)")
+
+    async def purge_all(self):
+        """Wipe every paste and image (ephemeral/session mode)."""
+        async with self._lock:
+            cur = await self._conn.execute("SELECT COUNT(*) AS n FROM pastes")
+            n = (await cur.fetchone())["n"]
+            await self._conn.execute("DELETE FROM pastes")
+            await self._conn.execute("DELETE FROM images")
+            await self._conn.commit()
+        removed = 0
+        try:
+            for f in self.images_dir.iterdir():
+                if f.is_file():
+                    f.unlink(missing_ok=True)
+                    removed += 1
+        except FileNotFoundError:
+            pass
+        if n or removed:
+            logger.info(f"Session cleanup: removed {n} paste(s) and {removed} image file(s)")
+        return n
 
 
 def create_storage():

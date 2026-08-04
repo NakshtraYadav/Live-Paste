@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.0] - 2025-07
+
+### Added
+- **Autostart at login** — `livepaste autostart enable|disable|status` installs a macOS LaunchAgent (launchd) or Linux systemd user service; the installer also offers it as a prompt.
+- **Persistent settings** — `livepaste config` to view/change `port`, `data-dir`, `keep-data`, and `repo` any time after installation (stored in `~/.livepaste/config`).
+- **Custom install location** — the installer now asks where LivePaste should live (default `~/.livepaste`).
+- **Temporary sessions by default (local mode)** — all pastes, links, and images are wiped on graceful exit; if the app is force-killed, leftovers are cleared automatically on the next startup. Opt out with `livepaste start --keep-data` or `livepaste config keep-data on`. Hosted MongoDB deployments are never affected.
+- `python -m livepaste` module entrypoint (used by the autostart services).
+
+### Changed
+- Startup banner now shows the session mode (temporary vs persistent).
+
+---
+
 ## [1.3.0] - 2025-07
 
 ### Added
