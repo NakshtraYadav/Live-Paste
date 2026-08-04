@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.0] - 2025-07
+
+### Added
+- **Inline images (Google Docs style)** — pasted, dropped, or uploaded images now render as actual images at the exact spot in the document where they were inserted, instead of appearing in an attachments strip.
+- **Hover controls on inline images** — open full size, copy image URL, and delete, shown on mouse-over of each image.
+- **Keyboard editing around images** — Backspace at the start of a line deletes the image above it; Delete at the end of a line removes the image below; arrow keys move the caret across images.
+- **Click-to-type zones** — slim insert zones between adjacent images and at document edges let you place the caret anywhere.
+- **Automatic file cleanup** — deleting an image (button or Backspace) also removes the stored file from GridFS when no references remain.
+
+### Changed
+- Editor re-architected as a block-based document (`InlineBlocksEditor`): text segments keep Prism syntax highlighting and continuous line numbers, image token lines render as inline image blocks. The underlying content format and real-time sync protocol are unchanged.
+
+### Removed
+- Bottom "Images (N)" attachments strip — superseded by inline rendering.
+
+---
+
 ## [1.1.0] - 2025-07
 
 ### Added
@@ -36,5 +53,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MongoDB persistence (Motor async driver) — pastes survive refreshes and reconnects.
 - WebSocket POC test script (`scripts/ws_poc_test.py`) validating external `wss://` connectivity through ingress (13/13 checks passed).
 
+[1.2.0]: #120---2025-07
 [1.1.0]: #110---2025-07
 [1.0.0]: #100---2025-07

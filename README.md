@@ -13,7 +13,7 @@ LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Cre
 - **Instant live links** — random short slugs by default, or pick a custom slug (e.g. `/my-notes`)
 - **Real-time collaboration** — edits broadcast to all connected clients in under a second via WebSockets
 - **Syntax highlighting** — Prism-powered highlighting for Python, JavaScript, TypeScript, and many more languages
-- **Image support** — paste or upload screenshots/images inline (up to 100 MB each, stored in GridFS)
+- **Inline images (Google Docs style)** — paste, drop, or upload screenshots and they render right at your cursor position in the document (up to 100 MB each, stored in GridFS), with hover controls to open, copy URL, or delete
 - **Optional expiry** — auto-delete pastes after 1 hour, 1 day, 1 week, or keep forever
 - **Live presence** — see how many people are viewing right now, plus total views
 - **Editor niceties** — line numbers, status bar (lines / chars / size), copy content & copy link buttons
@@ -39,7 +39,7 @@ LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Cre
 ├── frontend/
 │   ├── src/
 │   │   ├── pages/         # HomePage (create), PastePage (live editor)
-│   │   ├── components/    # ThemeToggle, shadcn/ui components
+│   │   ├── components/    # InlineBlocksEditor (inline images), ThemeToggle, shadcn/ui
 │   │   └── hooks/         # useTheme, use-toast
 │   └── package.json
 ├── scripts/
