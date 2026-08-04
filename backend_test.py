@@ -12,7 +12,7 @@ from datetime import datetime
 from io import BytesIO
 from PIL import Image
 
-BASE_URL = "https://livepaste.preview.emergentagent.com"
+BASE_URL = "https://command-hub-119.preview.emergentagent.com"
 WS_URL = "wss://livepaste.preview.emergentagent.com"
 
 class TestResults:

@@ -14,7 +14,7 @@ import uuid
 import httpx
 import websockets
 
-BASE_URL = "https://livepaste.preview.emergentagent.com"
+BASE_URL = "https://command-hub-119.preview.emergentagent.com"
 WS_BASE = BASE_URL.replace("https://", "wss://")
 
 results = []
