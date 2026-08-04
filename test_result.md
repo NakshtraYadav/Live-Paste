@@ -133,3 +133,5 @@ test_plan:
 agent_communication:
     - agent: "main"
       message: "Frontend-only change. New component InlineBlocksEditor.jsx replaces the single react-simple-code-editor instance in PastePage. Test ids: paste-inline-image-{id}, paste-inline-image-open/copy/delete-{id}, paste-insert-zone-{index}, paste-live-editor. Attachment strip test ids (paste-attachments-strip etc.) were removed intentionally. Real-time sync model unchanged (full-content WS edits)."
+    - agent: "main"
+      message: "Housekeeping (user request): removed all Emergent branding/references from the repo — cleaned index.html (removed PostHog analytics + emergent meta description), removed @emergentbase/visual-edits from package.json/craco/yarn.lock, deleted unused testIds scaffolding, minimized backend requirements.txt, and deleted extra files (backend_test.py, plan.md, design_guidelines.md, test_reports/, scripts/, tests/, pytest.ini, frontend/README.md, .gitconfig). Services restarted and verified working (health OK, UI loads, inline images intact). frontend/.env preview URL is protected infra and gitignored."
