@@ -5,18 +5,16 @@
 #
 #    curl -fsSL https://raw.githubusercontent.com/NakshtraYadav/Live-Paste/main/install.sh | bash
 #
-#  Installs LivePaste into its own virtual environment (~/.livepaste/venv)
-#  and links the `livepaste` command into your PATH.
+#  Prefers the prebuilt standalone binary (no Python needed!). Falls back to
+#  a pip install inside a private virtualenv when no binary release exists.
 # ============================================================================
 
 set -euo pipefail
 
 REPO="${LIVEPASTE_REPO:-NakshtraYadav/Live-Paste}"
 APP_DIR="$HOME/.livepaste"
-VENV_DIR="$APP_DIR/venv"
-CONFIG_FILE="$APP_DIR/config"
+CONFIG_FILE="$HOME/.livepaste/config"
 BIN_LINK_DIRS=("$HOME/.local/bin" "/usr/local/bin")
-TOTAL_STEPS=4
 
 # ---------------------------------------------------------------- terminal --
 # Interactive only when we have a real terminal to read from AND write to
@@ -47,6 +45,8 @@ EOF
   printf "  %s%sShare text & code on your network — in real time.%s\n" "$DIM" "$CYAN" "$RESET"
   printf "  %smade by %s%sNakshtra Yadav%s\n\n" "$DIM" "$RESET" "$BOLD" "$RESET"
 }
+
+TOTAL_STEPS=2
 
 # run_step <step-number> <label> <command...>
 run_step() {
@@ -95,64 +95,108 @@ ask() { # ask <question> <default>  -> echoes answer
 # ------------------------------------------------------------------- start --
 banner
 
-if [[ "$REPO" == CHANGE_ME* ]]; then
-  fail 'Set the repository first:  LIVEPASTE_REPO="owner/repo" bash install.sh'
-fi
-
-# --- python check ---
-PY=""
-for cand in python3 python; do
-  if command -v "$cand" >/dev/null 2>&1 && "$cand" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' 2>/dev/null; then
-    PY="$cand"; break
-  fi
-done
-if [[ -z "$PY" ]]; then
-  if [[ "$(uname)" == "Darwin" ]] && command -v brew >/dev/null 2>&1; then
-    printf "  %s!%s Python 3.9+ not found — installing via Homebrew (this can take a minute)\n" "$YELLOW" "$RESET"
-    brew install python@3.12 >/dev/null
-    PY="python3"
-  else
-    fail "Python 3.9+ is required. macOS: brew install python  |  Linux: use your package manager."
-  fi
-fi
-printf "  %s✓%s Found %s\n" "$GREEN" "$RESET" "$($PY --version 2>&1)"
-
 # --- interactive choices ---
 PORT="$(ask "Which port should LivePaste use?" "8090")"
 [[ "$PORT" =~ ^[0-9]+$ ]] || fail "Port must be a number"
 INSTALL_DIR="$(ask "Where should LivePaste live?" "$HOME/.livepaste")"
 INSTALL_DIR="${INSTALL_DIR/#\~/$HOME}"
 APP_DIR="$INSTALL_DIR"
-VENV_DIR="$APP_DIR/venv"
 echo
 
-# --- steps ---
-mkdir -p "$APP_DIR"
-# Advanced: install from a custom source (e.g. a local checkout) instead of GitHub
-INSTALL_SOURCE="${LIVEPASTE_INSTALL_SOURCE:-git+https://github.com/$REPO.git}"
-run_step 1 "Creating private environment (~/.livepaste/venv)" "$PY" -m venv --clear "$VENV_DIR"
-run_step 2 "Preparing installer (pip)" "$VENV_DIR/bin/pip" install --upgrade pip
-run_step 3 "Downloading & installing LivePaste from github.com/$REPO" \
-  "$VENV_DIR/bin/pip" install --upgrade "$INSTALL_SOURCE"
+# --- pick install method: prebuilt binary (no Python!) or pip fallback ---
+OS="$(uname -s)"; MACHINE="$(uname -m)"
+case "$MACHINE" in
+  arm64|aarch64) ARCH="arm64" ;;
+  x86_64|amd64)  ARCH="x86_64" ;;
+  *)             ARCH="" ;;
+esac
+ASSET=""
+case "$OS" in
+  Darwin) [[ -n "$ARCH" ]] && ASSET="livepaste-macos-$ARCH" ;;
+  Linux)  [[ -n "$ARCH" ]] && ASSET="livepaste-linux-$ARCH" ;;
+esac
 
-link_cli() {
-  local linked=""
-  for dir in "${BIN_LINK_DIRS[@]}"; do
-    if { [[ -d "$dir" && -w "$dir" ]] || mkdir -p "$dir" 2>/dev/null; }; then
-      ln -sf "$VENV_DIR/bin/livepaste" "$dir/livepaste" && linked="$dir" && break
-    fi
-  done
+BINARY_URL=""
+if [[ -n "$ASSET" && "${LIVEPASTE_FORCE_PYTHON:-0}" != "1" ]]; then
+  CANDIDATE="https://github.com/$REPO/releases/latest/download/$ASSET"
+  if curl -fsIL --max-time 10 -o /dev/null "$CANDIDATE" 2>/dev/null; then
+    BINARY_URL="$CANDIDATE"
+  fi
+fi
+
+LIVEPASTE_BIN=""
+mkdir -p "$APP_DIR"
+
+write_config() {
   mkdir -p "$(dirname "$CONFIG_FILE")"
   {
     echo "PORT=$PORT"
     echo "REPO=$REPO"
     echo "DATA_DIR=$APP_DIR"
   } > "$CONFIG_FILE"
+}
+
+link_cli() {
+  local linked=""
+  for dir in "${BIN_LINK_DIRS[@]}"; do
+    if { [[ -d "$dir" && -w "$dir" ]] || mkdir -p "$dir" 2>/dev/null; }; then
+      ln -sf "$LIVEPASTE_BIN" "$dir/livepaste" && linked="$dir" && break
+    fi
+  done
+  write_config
   [[ -n "$linked" ]]
 }
-run_step 4 "Linking the livepaste command into your PATH" link_cli
 
-VERSION_INSTALLED="$("$VENV_DIR/bin/livepaste" version 2>/dev/null | head -1 | sed 's/\x1b\[[0-9;]*m//g' | awk '{print $2}')"
+if [[ -n "$BINARY_URL" ]]; then
+  # ------------------------- binary install (no Python) --------------------
+  printf "  %s✓%s Standalone app available for %s — %sno Python needed!%s\n\n" "$GREEN" "$RESET" "$OS/$ARCH" "$BOLD" "$RESET"
+  TOTAL_STEPS=2
+  LIVEPASTE_BIN="$APP_DIR/bin/livepaste"
+
+  download_binary() {
+    mkdir -p "$APP_DIR/bin"
+    curl -fSL --progress-bar -o "$LIVEPASTE_BIN.tmp" "$BINARY_URL"
+    chmod +x "$LIVEPASTE_BIN.tmp"
+    mv "$LIVEPASTE_BIN.tmp" "$LIVEPASTE_BIN"
+    if [[ "$OS" == "Darwin" ]]; then
+      xattr -d com.apple.quarantine "$LIVEPASTE_BIN" 2>/dev/null || true
+    fi
+  }
+  run_step 1 "Downloading the LivePaste app" download_binary
+  run_step 2 "Linking the livepaste command into your PATH" link_cli
+else
+  # -------------------------- pip install fallback --------------------------
+  printf "  %s!%s No prebuilt app for %s yet — installing with Python instead.\n\n" "$YELLOW" "$RESET" "${OS}/${ARCH:-unknown}"
+  TOTAL_STEPS=4
+  VENV_DIR="$APP_DIR/venv"
+  LIVEPASTE_BIN="$VENV_DIR/bin/livepaste"
+
+  PY=""
+  for cand in python3 python; do
+    if command -v "$cand" >/dev/null 2>&1 && "$cand" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' 2>/dev/null; then
+      PY="$cand"; break
+    fi
+  done
+  if [[ -z "$PY" ]]; then
+    if [[ "$OS" == "Darwin" ]] && command -v brew >/dev/null 2>&1; then
+      printf "  %s!%s Python 3.9+ not found — installing via Homebrew (this can take a minute)\n" "$YELLOW" "$RESET"
+      brew install python@3.12 >/dev/null
+      PY="python3"
+    else
+      fail "Python 3.9+ is required. macOS: brew install python  |  Linux: use your package manager."
+    fi
+  fi
+  printf "  %s✓%s Found %s\n" "$GREEN" "$RESET" "$($PY --version 2>&1)"
+
+  INSTALL_SOURCE="${LIVEPASTE_INSTALL_SOURCE:-git+https://github.com/$REPO.git}"
+  run_step 1 "Creating private environment" "$PY" -m venv --clear "$VENV_DIR"
+  run_step 2 "Preparing installer (pip)" "$VENV_DIR/bin/pip" install --upgrade pip
+  run_step 3 "Downloading & installing LivePaste from github.com/$REPO" \
+    "$VENV_DIR/bin/pip" install --upgrade "$INSTALL_SOURCE"
+  run_step 4 "Linking the livepaste command into your PATH" link_cli
+fi
+
+VERSION_INSTALLED="$("$LIVEPASTE_BIN" version 2>/dev/null | head -1 | sed 's/\x1b\[[0-9;]*m//g' | awk '{print $2}')"
 
 # --- summary ---
 echo
@@ -176,7 +220,7 @@ echo
 if [[ "$INTERACTIVE" == "1" ]]; then
   AUTOSTART="$(ask "Start LivePaste automatically when you log in?" "n")"
   if [[ "$AUTOSTART" =~ ^[Yy] ]]; then
-    "$VENV_DIR/bin/livepaste" autostart enable || true
+    "$LIVEPASTE_BIN" autostart enable || true
   fi
 fi
 
@@ -186,6 +230,6 @@ if [[ "$INTERACTIVE" == "1" ]]; then
 fi
 if [[ "$START_NOW" =~ ^[Yy] ]]; then
   echo
-  exec "$VENV_DIR/bin/livepaste" start --port "$PORT"
+  exec "$LIVEPASTE_BIN" start --port "$PORT"
 fi
 echo

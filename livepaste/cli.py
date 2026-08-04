@@ -158,8 +158,65 @@ def cmd_start(args):
             pass
 
     import uvicorn
+    from .core import app  # direct object import — works in frozen binaries too
 
-    uvicorn.run("livepaste.core:app", host=host, port=port, log_level="warning")
+    uvicorn.run(app, host=host, port=port, log_level="warning")
+
+
+def is_frozen() -> bool:
+    """True when running as a standalone (PyInstaller) binary."""
+    return bool(getattr(sys, "frozen", False))
+
+
+def binary_asset_name():
+    """Release asset name for this OS/CPU, or None if unsupported."""
+    import platform
+
+    system = platform.system()
+    machine = platform.machine().lower()
+    arch = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "x86_64", "amd64": "x86_64"}.get(machine)
+    if not arch:
+        return None
+    if system == "Darwin":
+        return f"livepaste-macos-{arch}"
+    if system == "Linux":
+        return f"livepaste-linux-{arch}"
+    return None
+
+
+def _update_binary(latest):
+    """Self-update a standalone binary from the latest GitHub release."""
+    import stat
+    import tempfile
+
+    asset = binary_asset_name()
+    if not asset:
+        print("✗ No prebuilt binary for this platform. Reinstall from GitHub instead.")
+        sys.exit(1)
+    slug = repo_slug()
+    url = f"https://github.com/{slug}/releases/latest/download/{asset}"
+    target = os.path.realpath(sys.executable)
+    print(f"Downloading {url} ...")
+    try:
+        with urllib.request.urlopen(url, timeout=120) as resp:
+            data = resp.read()
+    except Exception as e:
+        print(f"✗ Download failed: {e}")
+        sys.exit(1)
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(target), prefix=".livepaste-new-")
+    try:
+        with os.fdopen(tmp_fd, "wb") as f:
+            f.write(data)
+        os.chmod(tmp_path, os.stat(tmp_path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        os.replace(tmp_path, target)
+    except Exception as e:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        print(f"✗ Could not replace the binary: {e}")
+        sys.exit(1)
+    print(f"✓ Updated successfully{f' to v{latest}' if latest else ''}. Restart `livepaste start` to use it.")
 
 
 def cmd_update(args):
@@ -173,6 +230,9 @@ def cmd_update(args):
     latest_t = parse_version(latest) if latest else None
     if latest_t and current_t and latest_t <= current_t and not args.force:
         print(f"Already on the latest version (v{__version__}).")
+        return
+    if is_frozen():
+        _update_binary(latest)
         return
     target = f"git+https://github.com/{slug}.git"
     print(f"Updating LivePaste from {target} ...")

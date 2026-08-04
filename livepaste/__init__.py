@@ -4,6 +4,13 @@ from pathlib import Path
 
 
 def _detect_version() -> str:
+    # Standalone binary: version baked in at build time by the CI workflow
+    try:
+        from ._version import __version__ as v
+
+        return v
+    except ImportError:
+        pass
     # Installed package: read from package metadata
     try:
         from importlib.metadata import version

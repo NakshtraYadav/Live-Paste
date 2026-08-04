@@ -1,0 +1,88 @@
+name: Build & Release binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-14        # Apple Silicon (arm64)
+            asset: livepaste-macos-arm64
+          - os: macos-13        # Intel (x86_64)
+            asset: livepaste-macos-x86_64
+          - os: ubuntu-22.04    # Linux x86_64
+            asset: livepaste-linux-x86_64
+          - os: ubuntu-22.04-arm  # Linux arm64 (Raspberry Pi 4+, ARM servers)
+            asset: livepaste-linux-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Bake version into the binary
+        shell: bash
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          echo "__version__ = \"$VERSION\"" > livepaste/_version.py
+          echo "Building LivePaste v$VERSION for ${{ matrix.asset }}"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install . pyinstaller
+
+      - name: Build standalone binary
+        run: |
+          pyinstaller --onefile --name livepaste \
+            --add-data "livepaste/static:livepaste/static" \
+            --collect-submodules uvicorn \
+            --hidden-import aiosqlite \
+            --hidden-import multipart \
+            packaging/entry.py
+
+      - name: Smoke test the binary
+        shell: bash
+        run: |
+          ./dist/livepaste version
+          ./dist/livepaste start --port 8123 --no-update-check &
+          SERVER_PID=$!
+          sleep 8
+          curl -sf http://localhost:8123/api/health
+          curl -sf -o /dev/null http://localhost:8123/
+          kill $SERVER_PID
+
+      - name: Rename asset
+        run: mv dist/livepaste dist/${{ matrix.asset }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-22.04
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

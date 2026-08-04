@@ -24,10 +24,18 @@ LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Cre
 
 Run LivePaste locally and share pastes with everyone on your Wi-Fi — no accounts, no cloud, no database to install.
 
-**One-line install** (interactive, animated):
+**One-line install** (interactive, animated — **no Python needed** when a binary release exists):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/NakshtraYadav/Live-Paste/main/install.sh | bash
+```
+
+The installer automatically downloads the standalone app for your Mac (Apple Silicon or Intel) or Linux machine from [Releases](https://github.com/NakshtraYadav/Live-Paste/releases). If no binary exists for your platform it falls back to a Python install.
+
+**Manual binary download** — grab the file for your machine from the [Releases page](https://github.com/NakshtraYadav/Live-Paste/releases), then:
+
+```bash
+chmod +x livepaste-macos-arm64 && ./livepaste-macos-arm64 start
 ```
 
 **Or install with pip / pipx:**
@@ -177,6 +185,11 @@ sudo supervisorctl restart all
    rm -rf ../livepaste/static && cp -r build ../livepaste/static
    ```
 3. Push to GitHub — every installed copy will see the update notice on next start
+4. **For standalone binaries:** create and push a tag — GitHub Actions builds macOS (arm64 + Intel) and Linux (x86_64 + arm64) executables and publishes a Release automatically:
+   ```bash
+   git tag v1.5.0 && git push origin v1.5.0
+   ```
+   (You can also trigger the "Build & Release binaries" workflow manually from the Actions tab.)
 
 ## How It Works
 

@@ -22,6 +22,9 @@ def _log_path() -> Path:
 
 
 def _program_args():
+    if getattr(sys, "frozen", False):
+        # Standalone binary: sys.executable IS the livepaste binary
+        return [sys.executable, "start", "--no-update-check"]
     # Run via the exact interpreter this CLI lives in (works inside the venv)
     return [sys.executable, "-m", "livepaste", "start", "--no-update-check"]
 
