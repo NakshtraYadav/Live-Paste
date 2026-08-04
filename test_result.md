@@ -105,6 +105,24 @@
 user_problem_statement: "Images pasted into a paste were shown as attachments (bottom strip) instead of appearing inline in the document. Add Google Docs / Word style inline images. Then: make LivePaste an installable package (pip from GitHub repo NakshtraYadav/Live-Paste) with local SQLite storage (no MongoDB locally), LAN access, self-update from GitHub, and an interactive animated installer."
 
 backend:
+  - task: "Installer PATH bug fix: livepaste command not found after install"
+    implemented: true
+    working: true
+    file: "install.sh"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "user"
+          comment: "User installed on macOS via curl|bash, used default port, custom directory, started+closed the app. Afterwards `livepaste start`/`config` → command not found. Installer only printed a manual PATH hint (~/.local/bin not on PATH by default on macOS)."
+        - working: "NA"
+          agent: "main"
+          comment: "Fix in install.sh: (1) link_cli now prefers symlink targets already on PATH and writable (incl. /opt/homebrew/bin, /usr/local/bin, any writable $HOME dir on PATH) before falling back to ~/.local/bin; (2) new ensure_on_path() automatically appends export PATH=\"<linkdir>:$PATH\" to the correct shell profile (~/.zshrc for zsh, ~/.bash_profile on macOS bash, ~/.bashrc on Linux bash, ~/.profile fallback), idempotently, and prints clear 'open a new terminal or source <profile>' instructions. Needs testing-agent verification."
+        - working: true
+          agent: "testing"
+          comment: "Comprehensive installer PATH fix verification completed. ALL 4 test scenarios PASSED: ✅ Scenario 1 (PATH-fix): Installed to /tmp/th1 with PATH not including ~/.local/bin. Installer created symlink at /tmp/th1/.local/bin/livepaste, added exactly ONE export PATH line to .bashrc with idempotent check, printed clear instructions. Simulated new terminal test PASSED: `livepaste version` returned v1.5.0, `livepaste config` showed configuration, `livepaste start --port 8188` started successfully and responded to health check. ✅ Scenario 2 (Idempotency): Re-ran installer with same HOME. .bashrc still contains exactly ONE PATH export line (grep -c = 1). ✅ Scenario 3 (Already-on-PATH): Installed to /tmp/th2 with ~/.local/bin already on PATH. Symlink created, NO .bashrc file created, NO PATH export added, NO manual warning shown. ✅ Scenario 4 (zsh profile): Installed to /tmp/th3 with SHELL=/usr/bin/zsh. PATH export correctly added to .zshrc (not .bashrc). Hosted preview backend health check: 200 OK. The original bug (command not found after install) is completely fixed."
+
   - task: "Storage-layer refactor: livepaste package with MongoDB (hosted) + SQLite (local) backends"
     implemented: true
     working: true
@@ -136,12 +154,11 @@ frontend:
 metadata:
   created_by: "main_agent"
   version: "1.2"
-  test_sequence: 2
+  test_sequence: 3
   run_ui: false
 
 test_plan:
-  current_focus:
-    - "Storage-layer refactor: livepaste package with MongoDB (hosted) + SQLite (local) backends"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -153,3 +170,5 @@ agent_communication:
       message: "v1.4.0: Added CLI features — livepaste config (port/data-dir/keep-data/repo persisted in ~/.livepaste/config), livepaste autostart enable/disable/status (macOS launchd plist + Linux systemd user unit), installer prompts for install location + autostart. Local SQLite mode is now ephemeral by default: purge_all() on graceful shutdown AND on startup (covers force-kill), guarded to SQLite only via LIVEPASTE_EPHEMERAL env set by CLI — hosted Mongo mode untouched (verified: preview health + paste creation OK after change). All flows tested in container: config persistence, graceful-exit wipe, force-kill recovery wipe, --keep-data persistence, autostart unit generation."
     - agent: "testing"
       message: "Backend regression testing complete. Created comprehensive test suite in /app/backend_test.py covering all 26 test scenarios from the review request. All tests passed successfully against the public URL https://command-hub-119.preview.emergentagest.com/api. The storage-layer refactor is working perfectly in MongoDB mode: REST endpoints (health, paste CRUD, image upload/get/delete via GridFS), WebSocket real-time collaboration (init, edit with rev tracking, language broadcast, presence, ping/pong, error handling), validation (slug format, reserved slugs, duplicates, expiry, content size), and serialization (ISO timestamps, no ObjectId leakage). No critical issues found. Backend is production-ready."
+    - agent: "testing"
+      message: "Installer PATH bug fix verification complete. Tested all 4 scenarios: (1) PATH-fix with ~/.local/bin not on PATH - installer automatically added export PATH to .bashrc and livepaste command works in new terminal, (2) Idempotency - re-running installer keeps only ONE PATH export line, (3) Already-on-PATH - no .bashrc modification when target dir already on PATH, (4) zsh profile - correctly uses .zshrc for zsh shell. The original bug (command not found after install) is completely resolved. Hosted preview backend remains healthy."

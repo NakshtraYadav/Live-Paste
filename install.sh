@@ -138,13 +138,72 @@ write_config() {
 
 link_cli() {
   local linked=""
-  for dir in "${BIN_LINK_DIRS[@]}"; do
+  local candidates=()
+  # 1st choice: directories that are ALREADY on PATH and writable (no profile edits needed)
+  local IFS=':'
+  for dir in $PATH; do
+    case "$dir" in
+      "$HOME"/*|/usr/local/bin|/opt/homebrew/bin)
+        if [[ -d "$dir" && -w "$dir" ]]; then candidates+=("$dir"); fi
+        ;;
+    esac
+  done
+  unset IFS
+  # Fallbacks (may need a PATH update, handled after install)
+  candidates+=("${BIN_LINK_DIRS[@]}")
+  for dir in "${candidates[@]}"; do
     if { [[ -d "$dir" && -w "$dir" ]] || mkdir -p "$dir" 2>/dev/null; }; then
       ln -sf "$LIVEPASTE_BIN" "$dir/livepaste" && linked="$dir" && break
     fi
   done
   write_config
   [[ -n "$linked" ]]
+}
+
+find_link_dir() { # where did the livepaste symlink end up?
+  local IFS=':'
+  for dir in $PATH; do
+    [[ -x "$dir/livepaste" ]] && { echo "$dir"; return; }
+  done
+  unset IFS
+  for dir in "${BIN_LINK_DIRS[@]}"; do
+    [[ -x "$dir/livepaste" ]] && { echo "$dir"; return; }
+  done
+  echo ""
+}
+
+shell_profile() {
+  case "${SHELL:-}" in
+    */zsh)  echo "$HOME/.zshrc" ;;
+    */bash) if [[ "$(uname -s)" == "Darwin" ]]; then echo "$HOME/.bash_profile"; else echo "$HOME/.bashrc"; fi ;;
+    *)      echo "$HOME/.profile" ;;
+  esac
+}
+
+# Make sure the `livepaste` command is reachable; fix PATH automatically if not
+ensure_on_path() {
+  PATH_FIX_NOTE=""
+  if command -v livepaste >/dev/null 2>&1; then
+    return
+  fi
+  local link_dir; link_dir="$(find_link_dir)"
+  if [[ -z "$link_dir" ]]; then
+    PATH_FIX_NOTE="manual"
+    return
+  fi
+  if [[ ":$PATH:" == *":$link_dir:"* ]]; then
+    return
+  fi
+  local profile; profile="$(shell_profile)"
+  if ! grep -qs "livepaste" "$profile" 2>/dev/null || ! grep -qs "$link_dir" "$profile" 2>/dev/null; then
+    {
+      echo ""
+      echo "# Added by the LivePaste installer (makes the 'livepaste' command available)"
+      echo "export PATH=\"$link_dir:\$PATH\""
+    } >> "$profile"
+  fi
+  export PATH="$link_dir:$PATH"
+  PATH_FIX_NOTE="$profile"
 }
 
 if [[ -n "$BINARY_URL" ]]; then
@@ -198,6 +257,8 @@ fi
 
 VERSION_INSTALLED="$("$LIVEPASTE_BIN" version 2>/dev/null | head -1 | sed 's/\x1b\[[0-9;]*m//g' | awk '{print $2}')"
 
+ensure_on_path
+
 # --- summary ---
 echo
 printf "  %s%s╭───────────────────────────────────────────────╮%s\n" "$TEAL" "$BOLD" "$RESET"
@@ -209,11 +270,12 @@ printf "  %s%s│%s   Settings:   %slivepaste config%s  %s(port, data-dir, ...)%
 printf "  %s%s│%s   Location:   %s\n" "$TEAL" "$BOLD" "$RESET" "$APP_DIR"
 printf "  %s%s╰───────────────────────────────────────────────╯%s\n" "$TEAL" "$BOLD" "$RESET"
 
-if ! command -v livepaste >/dev/null 2>&1; then
-  if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
-    printf "\n  %s!%s Add this to your shell profile, then reopen the terminal:\n" "$YELLOW" "$RESET"
-    printf "     %sexport PATH=\"\$HOME/.local/bin:\$PATH\"%s\n" "$BOLD" "$RESET"
-  fi
+if [[ "$PATH_FIX_NOTE" == "manual" ]]; then
+  printf "\n  %s!%s Could not link into your PATH. Start LivePaste with:\n" "$YELLOW" "$RESET"
+  printf "     %s%s start%s\n" "$BOLD" "$LIVEPASTE_BIN" "$RESET"
+elif [[ -n "$PATH_FIX_NOTE" ]]; then
+  printf "\n  %s✓%s Added the livepaste command to your PATH %s(saved in %s)%s\n" "$GREEN" "$RESET" "$DIM" "$PATH_FIX_NOTE" "$RESET"
+  printf "    Open a %snew terminal window%s (or run %ssource %s%s) before using it.\n" "$BOLD" "$RESET" "$BOLD" "$PATH_FIX_NOTE" "$RESET"
 fi
 echo
 
