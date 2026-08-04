@@ -101,3 +101,35 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: "Images pasted into a paste were shown as attachments (bottom strip) instead of appearing inline in the document. Add Google Docs / Word style inline images: the image should render at the exact spot where it is pasted."
+
+frontend:
+  - task: "Inline images in paste editor (Google Docs style)"
+    implemented: true
+    working: true
+    file: "frontend/src/components/InlineBlocksEditor.jsx, frontend/src/pages/PastePage.jsx, frontend/src/index.css"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Rewrote editor as block-based document: content string (with ![name](url) token lines) is parsed into alternating text/image blocks. Text blocks keep Prism syntax highlighting + per-block line numbers in gutter; image token lines render as actual inline <img> with hover controls (open / copy URL / delete). Clipboard paste, drag&drop, and Add-image button all insert the image at the caret position. Backspace at start of a block deletes the image above it (and removes orphaned GridFS file). Removed the bottom attachments strip. Verified via browser automation: inline render at correct line, caret insertion, typing between images, backspace delete + server file cleanup, persistence via WS/Mongo. Backend untouched."
+
+metadata:
+  created_by: "main_agent"
+  version: "1.1"
+  test_sequence: 1
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "Inline images in paste editor (Google Docs style)"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+    - agent: "main"
+      message: "Frontend-only change. New component InlineBlocksEditor.jsx replaces the single react-simple-code-editor instance in PastePage. Test ids: paste-inline-image-{id}, paste-inline-image-open/copy/delete-{id}, paste-insert-zone-{index}, paste-live-editor. Attachment strip test ids (paste-attachments-strip etc.) were removed intentionally. Real-time sync model unchanged (full-content WS edits)."

@@ -137,12 +137,129 @@
   min-width: 52px;
 }
 
+/* ---------- Block-based inline editor (text + inline images) ---------- */
+.lp-block-row {
+  display: flex;
+  min-width: 100%;
+}
+
+.lp-gutter-cell {
+  position: sticky;
+  left: 0;
+  z-index: 10;
+  flex-shrink: 0;
+  user-select: none;
+  text-align: right;
+  background: hsl(var(--editor-gutter));
+  border-right: 1px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13.5px;
+  line-height: 1.65;
+  padding: 0 10px 0 14px;
+}
+
+.lp-block-text {
+  padding: 0 20px;
+  min-width: 0;
+  cursor: text;
+}
+
+.lp-block-text textarea,
+.lp-block-text pre {
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-size: 13.5px !important;
+  line-height: 1.65 !important;
+  white-space: pre !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+}
+
+.lp-block-text textarea {
+  outline: none !important;
+  caret-color: hsl(var(--editor-caret));
+}
+
+.lp-image-cell {
+  padding: 6px 20px;
+}
+
+.lp-inline-image {
+  position: relative;
+  display: inline-block;
+  max-width: min(760px, calc(100vw - 140px));
+}
+
+.lp-inline-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 440px;
+  border-radius: 10px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--muted));
+}
+
+.lp-image-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+  transition: opacity 0.15s ease;
+}
+
+.lp-image-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  width: 28px;
+  border-radius: 8px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background) / 0.92);
+  color: hsl(var(--foreground));
+  backdrop-filter: blur(4px);
+}
+
+.lp-image-actions button:hover {
+  background: hsl(var(--secondary));
+}
+
+.lp-image-actions button.lp-danger {
+  color: hsl(var(--destructive));
+}
+
+.lp-null-zone {
+  display: block;
+  height: 14px;
+  cursor: text;
+  text-align: left;
+  padding: 0 20px;
+  background: transparent;
+  border: none;
+}
+
+.lp-null-zone .lp-null-hint {
+  display: none;
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10.5px;
+  color: hsl(var(--muted-foreground) / 0.7);
+  line-height: 14px;
+}
+
+.lp-null-zone:hover .lp-null-hint {
+  display: inline;
+}
+
 @media (min-width: 640px) {
   .lp-editor-wrap textarea,
-  .lp-editor-wrap pre {
+  .lp-editor-wrap pre,
+  .lp-block-text textarea,
+  .lp-block-text pre {
     font-size: 14px !important;
   }
-  .lp-gutter {
+  .lp-gutter,
+  .lp-gutter-cell {
     font-size: 14px;
   }
 }
