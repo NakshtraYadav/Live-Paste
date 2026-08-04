@@ -102,7 +102,23 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Images pasted into a paste were shown as attachments (bottom strip) instead of appearing inline in the document. Add Google Docs / Word style inline images: the image should render at the exact spot where it is pasted."
+user_problem_statement: "Images pasted into a paste were shown as attachments (bottom strip) instead of appearing inline in the document. Add Google Docs / Word style inline images. Then: make LivePaste an installable package (pip from GitHub repo NakshtraYadav/Live-Paste) with local SQLite storage (no MongoDB locally), LAN access, self-update from GitHub, and an interactive animated installer."
+
+backend:
+  - task: "Storage-layer refactor: livepaste package with MongoDB (hosted) + SQLite (local) backends"
+    implemented: true
+    working: true
+    file: "livepaste/core.py, livepaste/storage.py, backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Moved the whole FastAPI app into /app/livepaste package with a pluggable storage layer. backend/server.py is now a thin wrapper (loads backend/.env, imports livepaste.core:app) so supervisor/preview still uses MongoDB via MONGO_URL. SQLite mode verified separately on port 8090 (REST, WS edit, image file storage, SPA serving all pass). Preview Mongo mode needs full regression: health, create paste (random+custom slug, reserved/duplicate/invalid validation), get paste + count_view, image upload/get/delete (GridFS), WS /api/ws/{slug} (init/edit/language/presence/not_found), expiry validation, 400KB cap."
+        - working: true
+          agent: "testing"
+          comment: "Comprehensive regression test completed against https://command-hub-119.preview.emergentagent.com. ALL 26 tests PASSED: ✅ Health endpoint (200 OK, ISO timestamp) ✅ Create paste with random 7-char slug (rev=0, views=0) ✅ Create paste with custom slug ✅ Duplicate slug validation (409) ✅ Reserved slug validation (400 for 'api') ✅ Invalid slug validation (400 for short/bad chars) ✅ Invalid expiry validation (400) ✅ Expiry 1h (expiresAt ~1h future) ✅ Expiry never (expiresAt=null) ✅ Content size limit (413 for >400KB) ✅ Get paste (returns correct data) ✅ Get paste with count_view=true (increments views) ✅ Get unknown paste (404) ✅ Image upload (returns 24-hex id, url, name, size) ✅ Image get (200 with image/* content-type and Content-Length) ✅ Image delete (returns ok:true) ✅ Image get after delete (404) ✅ Image upload non-image (400) ✅ Image upload to unknown slug (404) ✅ WebSocket init (receives type:init with paste and viewers) ✅ WebSocket edit (broadcasts with incremented rev, persists to DB) ✅ WebSocket language (broadcasts language change) ✅ WebSocket presence (broadcasts viewer count on join/leave) ✅ WebSocket ping/pong ✅ WebSocket not_found (error + close for non-existent slug). Serialization verified: all timestamps are ISO strings, no ObjectId leakage in any JSON response. MongoDB GridFS image storage working correctly. Storage-layer refactor is production-ready."
 
 frontend:
   - task: "Inline images in paste editor (Google Docs style)"
@@ -119,13 +135,13 @@ frontend:
 
 metadata:
   created_by: "main_agent"
-  version: "1.1"
-  test_sequence: 1
+  version: "1.2"
+  test_sequence: 2
   run_ui: false
 
 test_plan:
   current_focus:
-    - "Inline images in paste editor (Google Docs style)"
+    - "Storage-layer refactor: livepaste package with MongoDB (hosted) + SQLite (local) backends"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -135,3 +151,5 @@ agent_communication:
       message: "Frontend-only change. New component InlineBlocksEditor.jsx replaces the single react-simple-code-editor instance in PastePage. Test ids: paste-inline-image-{id}, paste-inline-image-open/copy/delete-{id}, paste-insert-zone-{index}, paste-live-editor. Attachment strip test ids (paste-attachments-strip etc.) were removed intentionally. Real-time sync model unchanged (full-content WS edits)."
     - agent: "main"
       message: "Housekeeping (user request): removed all Emergent branding/references from the repo — cleaned index.html (removed PostHog analytics + emergent meta description), removed @emergentbase/visual-edits from package.json/craco/yarn.lock, deleted unused testIds scaffolding, minimized backend requirements.txt, and deleted extra files (backend_test.py, plan.md, design_guidelines.md, test_reports/, scripts/, tests/, pytest.ini, frontend/README.md, .gitconfig). Services restarted and verified working (health OK, UI loads, inline images intact). frontend/.env preview URL is protected infra and gitignored."
+    - agent: "testing"
+      message: "Backend regression testing complete. Created comprehensive test suite in /app/backend_test.py covering all 26 test scenarios from the review request. All tests passed successfully against the public URL https://command-hub-119.preview.emergentagest.com/api. The storage-layer refactor is working perfectly in MongoDB mode: REST endpoints (health, paste CRUD, image upload/get/delete via GridFS), WebSocket real-time collaboration (init, edit with rev tracking, language broadcast, presence, ping/pong, error handling), validation (slug format, reserved slugs, duplicates, expiry, content size), and serialization (ISO timestamps, no ObjectId leakage). No critical issues found. Backend is production-ready."

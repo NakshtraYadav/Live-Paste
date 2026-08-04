@@ -8,3 +8,4 @@ python-dotenv==1.2.2
 python-multipart==0.0.32
 websockets==16.1.1
 dnspython==2.8.0
+aiosqlite==0.20.0

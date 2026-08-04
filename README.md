@@ -20,21 +20,77 @@ LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Cre
 - **Dark mode** — toggle persisted across sessions
 - **Anonymous by design** — no login, no tracking, just a link
 
+## Install on Your Machine (macOS / Linux)
+
+Run LivePaste locally and share pastes with everyone on your Wi-Fi — no accounts, no cloud, no database to install.
+
+**One-line install** (interactive, animated):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/NakshtraYadav/Live-Paste/main/install.sh | bash
+```
+
+**Or install with pip / pipx:**
+
+```bash
+pip install git+https://github.com/NakshtraYadav/Live-Paste.git
+```
+
+**Then start it:**
+
+```bash
+livepaste start
+```
+
+```
+  ╭────────────────────────────────────────────────────╮
+  │  ⚡ LivePaste v1.3.0  made by Nakshtra Yadav
+  ├────────────────────────────────────────────────────┤
+  │  Local:    http://localhost:8090
+  │  Network:  http://192.168.1.23:8090  (share on your Wi-Fi)
+  │  Data:     ~/.livepaste
+  ╰────────────────────────────────────────────────────╯
+```
+
+- Pastes and images are stored locally in `~/.livepaste` (SQLite + files — nothing else to install)
+- Anyone on your network can open the `Network` URL and collaborate live
+- **Stay up to date:** LivePaste checks this repo's `VERSION` on startup and tells you when a new release is out — update any time with:
+
+```bash
+livepaste update
+```
+
+**CLI reference:**
+
+| Command                              | Description                                   |
+| ------------------------------------ | --------------------------------------------- |
+| `livepaste start`                     | Start the server (LAN-accessible by default)  |
+| `livepaste start --port 9000`         | Use a custom port                             |
+| `livepaste start --data-dir ~/pastes` | Store data somewhere else                     |
+| `livepaste update`                    | Update to the latest version from GitHub      |
+| `livepaste version`                   | Show version + check for updates              |
+
 ## Tech Stack
 
-| Layer      | Technology                                                |
-| ---------- | --------------------------------------------------------- |
-| Frontend   | React 19, Tailwind CSS, shadcn/ui, Prism (highlighting)   |
-| Backend    | FastAPI (Python), WebSockets, Motor (async MongoDB)       |
-| Database   | MongoDB (pastes) + GridFS (images)                        |
-| Realtime   | Native WebSockets at `/api/ws/{slug}` with room broadcast |
+| Layer      | Technology                                                 |
+| ---------- | ---------------------------------------------------------- |
+| Frontend   | React 19, Tailwind CSS, shadcn/ui, Prism (highlighting)    |
+| Backend    | FastAPI (Python), WebSockets, pluggable storage layer      |
+| Storage    | Local mode: SQLite + files · Hosted mode: MongoDB + GridFS |
+| Realtime   | Native WebSockets at `/api/ws/{slug}` with room broadcast  |
+| Packaging  | pip-installable `livepaste` CLI with bundled frontend      |
 
 ## Project Structure
 
 ```
 /app
+├── livepaste/             # Installable Python package
+│   ├── core.py            # FastAPI app: REST + WebSocket + SPA serving
+│   ├── storage.py         # Storage backends (SQLite local / MongoDB hosted)
+│   ├── cli.py             # livepaste start / update / version
+│   └── static/            # Bundled frontend build
 ├── backend/
-│   ├── server.py          # FastAPI app: REST + WebSocket + GridFS images
+│   ├── server.py          # Hosted-mode entrypoint (loads .env, exposes app)
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
@@ -42,9 +98,9 @@ LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Cre
 │   │   ├── components/    # InlineBlocksEditor (inline images), ThemeToggle, shadcn/ui
 │   │   └── hooks/         # useTheme, use-toast
 │   └── package.json
-├── scripts/
-│   └── ws_poc_test.py     # External WebSocket connectivity test
-├── VERSION                # Current release version
+├── install.sh             # Interactive installer (curl | bash)
+├── pyproject.toml         # Package definition
+├── VERSION                # Current release version (drives update checks)
 ├── CHANGELOG.md           # Release history
 └── README.md
 ```
@@ -92,20 +148,27 @@ sudo supervisorctl restart all
 
 ### Environment Variables
 
-| File            | Variable                | Purpose                                  |
-| --------------- | ----------------------- | ---------------------------------------- |
-| `backend/.env`  | `MONGO_URL`             | MongoDB connection string                |
-| `backend/.env`  | `DB_NAME`               | Database name                            |
-| `backend/.env`  | `CORS_ORIGINS`          | Allowed CORS origins                     |
-| `frontend/.env` | `REACT_APP_BACKEND_URL` | Public backend URL used for API/WS calls |
+| File / Env       | Variable                 | Purpose                                                    |
+| ---------------- | ------------------------ | ---------------------------------------------------------- |
+| `backend/.env`   | `MONGO_URL`              | MongoDB connection string (hosted mode; omit for SQLite)   |
+| `backend/.env`   | `DB_NAME`                | Database name (hosted mode)                                |
+| `backend/.env`   | `CORS_ORIGINS`           | Allowed CORS origins                                       |
+| `frontend/.env`  | `REACT_APP_BACKEND_URL`  | Backend URL baked into the build (omit for same-origin)    |
+| runtime          | `LIVEPASTE_DATA_DIR`     | Local-mode data directory (default `~/.livepaste`)         |
+| runtime          | `LIVEPASTE_PORT`         | Default port for `livepaste start`                         |
+| runtime          | `LIVEPASTE_REPO`         | GitHub `owner/repo` used for update checks                 |
 
 > Never hardcode URLs or ports — always use the environment variables above.
 
-## Testing
+### Releasing a New Version
 
-- **Backend API tests:** `python backend_test.py`
-- **WebSocket POC (external connectivity):** `python scripts/ws_poc_test.py`
-- Full test history and protocol: [`test_result.md`](./test_result.md)
+1. Bump the number in `VERSION` and add a `CHANGELOG.md` entry
+2. Rebuild the bundled frontend so installs ship the latest UI:
+   ```bash
+   cd frontend && REACT_APP_BACKEND_URL="" yarn build
+   rm -rf ../livepaste/static && cp -r build ../livepaste/static
+   ```
+3. Push to GitHub — every installed copy will see the update notice on next start
 
 ## How It Works
 
@@ -115,4 +178,4 @@ sudo supervisorctl restart all
 
 ---
 
-*Built with FastAPI · React · MongoDB*
+*Built with FastAPI · React · SQLite/MongoDB — made by Nakshtra Yadav*

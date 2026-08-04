@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.0] - 2025-07
+
+### Added
+- **Installable local app** — LivePaste is now a pip-installable package with a `livepaste` CLI (`start`, `update`, `version`). Runs entirely on your machine, no cloud services required.
+- **Zero-setup local storage** — automatically uses SQLite + on-disk image files (`~/.livepaste`) when no MongoDB is configured; hosted deployments with `MONGO_URL` keep using MongoDB.
+- **LAN sharing out of the box** — the server binds to `0.0.0.0` and prints both `Local` and `Network` URLs so anyone on the same Wi-Fi can open pastes.
+- **Bundled frontend** — the built React app ships inside the package and is served by FastAPI itself (one process, one port).
+- **Self-update from GitHub** — startup checks the repo's `VERSION` file and notifies when a newer release exists; `livepaste update` upgrades in one command.
+- **Interactive animated installer** (`install.sh`) — ASCII banner, step-by-step spinners, port prompt, and an optional immediate launch; safe non-interactive mode for `curl | bash`.
+
+### Changed
+- Backend re-architected into the `livepaste` package with a pluggable storage layer (MongoDB / SQLite); `backend/server.py` is now a thin hosted-mode entrypoint.
+- Frontend falls back to same-origin API/WebSocket URLs when no backend URL is configured at build time (self-hosted mode).
+
+---
+
 ## [1.2.0] - 2025-07
 
 ### Added
@@ -53,6 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MongoDB persistence (Motor async driver) — pastes survive refreshes and reconnects.
 - WebSocket POC test script (`scripts/ws_poc_test.py`) validating external `wss://` connectivity through ingress (13/13 checks passed).
 
+[1.3.0]: #130---2025-07
 [1.2.0]: #120---2025-07
 [1.1.0]: #110---2025-07
 [1.0.0]: #100---2025-07

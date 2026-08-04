@@ -31,9 +31,14 @@ export const EXPIRY_OPTIONS = [
   { value: "1w", label: "Expires in 1 week" },
 ];
 
-export const API_BASE = process.env.REACT_APP_BACKEND_URL;
+// Backend base URL. When REACT_APP_BACKEND_URL is not set at build time
+// (self-hosted / packaged mode), fall back to the same origin the app is
+// served from — API calls become relative and WebSockets use the page host.
+export const API_BASE = process.env.REACT_APP_BACKEND_URL || "";
 
-export const WS_BASE = (API_BASE || "").replace(/^http/, "ws");
+export const WS_BASE = API_BASE
+  ? API_BASE.replace(/^http/, "ws")
+  : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}`;
 
 export const copyToClipboard = async (text) => {
   try {
