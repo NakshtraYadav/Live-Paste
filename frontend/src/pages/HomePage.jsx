@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { LANGUAGES, EXPIRY_OPTIONS, API_BASE } from "@/lib/constants";
+import { editTokenStore } from "@/lib/editToken";
 
 export default function HomePage() {
   const navigate = useNavigate();
@@ -43,7 +44,10 @@ export default function HomePage() {
         expiry,
       });
       const slug = res.data.slug;
-      toast.success("Your live link is ready");
+      // The creator owns this paste — persist the edit token so they land in
+      // edit mode (not read-only) and can share either link type.
+      editTokenStore.save(slug, res.data.editToken);
+      toast.success("Your live edit link is ready");
       navigate(`/${slug}`);
     } catch (err) {
       const msg = err?.response?.data?.detail || "Could not create the link. Please try again.";

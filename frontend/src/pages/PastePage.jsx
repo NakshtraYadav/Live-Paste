@@ -23,9 +23,16 @@ import {
   X,
   RotateCcw,
   ArrowUpCircle,
+  Share2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -43,51 +50,11 @@ import {
   copyToClipboard,
   formatTimeLeft,
 } from "@/lib/constants";
+import { editTokenStore, consumeEditTokenFromUrl } from "@/lib/editToken";
 
 const DEBOUNCE_MS = 250;
 const PING_INTERVAL_MS = 25000;
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
-
-const editTokenStore = {
-  save: (slug, token) => {
-    try {
-      localStorage.setItem(`lp_edit_${slug}`, token);
-    } catch (e) {
-      /* private mode */
-    }
-  },
-  get: (slug) => {
-    try {
-      return localStorage.getItem(`lp_edit_${slug}`) || "";
-    } catch (e) {
-      return "";
-    }
-  },
-  clear: (slug) => {
-    try {
-      localStorage.removeItem(`lp_edit_${slug}`);
-    } catch (e) {
-      /* ignore */
-    }
-  },
-};
-
-// Accept ?edit=<token> in the URL and persist it (share-able edit links)
-const consumeEditTokenFromUrl = (slug) => {
-  try {
-    const params = new URLSearchParams(window.location.search);
-    const t = params.get("edit");
-    if (t) {
-      editTokenStore.save(slug, t);
-      params.delete("edit");
-      const qs = params.toString();
-      window.history.replaceState({}, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
-    }
-  } catch (e) {
-    /* ignore */
-  }
-  return editTokenStore.get(slug);
-};
 
 const formatBytes = (bytes) => {
   if (bytes < 1024) return `${bytes} B`;
@@ -944,17 +911,44 @@ export default function PastePage() {
             >
               {window.location.host}/<span className="text-foreground">{slug}</span>
             </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleCopyLink}
-              data-testid="paste-toolbar-copy-link-button"
-              className="shrink-0 active:scale-[0.98]"
-              aria-label="Copy link"
-            >
-              {copiedLink ? <Check className="h-3.5 w-3.5 sm:mr-1.5" /> : <Link2 className="h-3.5 w-3.5 sm:mr-1.5" />}
-              <span className="hidden sm:inline">{copiedLink ? "Copied" : "Copy link"}</span>
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  data-testid="paste-toolbar-share-button"
+                  className="shrink-0 active:scale-[0.98]"
+                  aria-label="Share"
+                >
+                  <Share2 className="h-3.5 w-3.5 sm:mr-1.5" />
+                  <span className="hidden sm:inline">Share</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-72">
+                <DropdownMenuItem
+                  onSelect={handleCopyLink}
+                  data-testid="paste-toolbar-copy-link-button"
+                >
+                  {copiedLink ? <Check className="mr-2 h-4 w-4" /> : <Link2 className="mr-2 h-4 w-4" />}
+                  <span className="flex-1">
+                    <span className="block text-sm font-medium">Copy view-only link</span>
+                    <span className="block text-xs text-muted-foreground">Anyone can read & copy</span>
+                  </span>
+                </DropdownMenuItem>
+                {canEdit && editToken && (
+                  <DropdownMenuItem
+                    onSelect={handleCopyEditLink}
+                    data-testid="paste-toolbar-copy-edit-link-button"
+                  >
+                    {copiedEdit ? <Check className="mr-2 h-4 w-4" /> : <KeyRound className="mr-2 h-4 w-4" />}
+                    <span className="flex-1">
+                      <span className="block text-sm font-medium">Copy edit link</span>
+                      <span className="block text-xs text-muted-foreground">Anyone with it can edit</span>
+                    </span>
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
               variant="outline"
               size="sm"
@@ -973,22 +967,11 @@ export default function PastePage() {
               data-testid="paste-toolbar-history-button"
               className="shrink-0 active:scale-[0.98]"
               aria-label="Revision history"
-            >              <History className="h-3.5 w-3.5 sm:mr-1.5" />
+            >
+              <History className="h-3.5 w-3.5 sm:mr-1.5" />
               <span className="hidden sm:inline">History</span>
             </Button>
-            {canEdit && editToken && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleCopyEditLink}
-                data-testid="paste-toolbar-copy-edit-link-button"
-                className="shrink-0 active:scale-[0.98]"
-                aria-label="Copy edit link"
-              >
-                {copiedEdit ? <Check className="h-3.5 w-3.5 sm:mr-1.5" /> : <KeyRound className="h-3.5 w-3.5 sm:mr-1.5" />}
-                <span className="hidden sm:inline">{copiedEdit ? "Copied" : "Edit link"}</span>
-              </Button>
-            )}
+
             <Button
               variant="outline"
               size="sm"

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.1.1] - 2026-09
+
+### Fixed
+- **New pastes open in edit mode for their creator** — the edit token was being returned by the API but never saved, so every freshly created link appeared read-only to the person who just made it. Creation now stores the token immediately; a fresh visit without the token is still read-only.
+- The token helpers moved to `frontend/src/lib/editToken.js` so the home page and paste page share one source of truth.
+
+### Changed
+- The toolbar's two separate copy buttons are replaced by a single **Share** menu offering both link types with descriptions: "Copy view-only link" (anyone can read & copy) and "Copy edit link" (anyone with it can edit).
+
+---
+
 ## [2.1.0] - 2026-09
 
 ### Added
