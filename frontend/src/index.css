@@ -229,6 +229,79 @@
   color: hsl(var(--destructive));
 }
 
+/* ---------- Inline file cards (any file type) ---------- */
+.lp-inline-file {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(760px, calc(100vw - 140px));
+  padding: 10px 44px 10px 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  background: hsl(var(--card));
+}
+
+.lp-file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  height: 38px;
+  width: 38px;
+  border-radius: 9px;
+  background: hsl(var(--muted));
+}
+
+.lp-file-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.lp-file-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: hsl(var(--foreground));
+  max-width: 420px;
+}
+
+.lp-file-url {
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  max-width: 420px;
+}
+
+.lp-file-actions {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  opacity: 0;
+}
+
+.lp-inline-file:hover .lp-file-actions {
+  opacity: 1;
+}
+
+.lp-file-download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  width: 28px;
+  border-radius: 8px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background) / 0.92);
+  color: hsl(var(--foreground));
+  backdrop-filter: blur(4px);
+}
+
+.lp-file-download:hover {
+  background: hsl(var(--secondary));
+}
+
 .lp-null-zone {
   display: block;
   height: 14px;

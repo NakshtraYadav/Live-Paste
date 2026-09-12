@@ -31,7 +31,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from .storage import create_storage, ImageTooLarge, now_utc
+from .storage import create_storage, FileTooLarge, now_utc
 
 logging.basicConfig(
     level=logging.INFO,
@@ -82,7 +82,7 @@ async def get_paste_doc(slug: str):
     paste = await storage.find_paste(slug)
     if paste and is_expired(paste):
         await storage.delete_paste(slug)
-        await storage.purge_paste_images(slug)
+        await storage.purge_paste_files(slug)
         return None
     return paste
 
@@ -159,44 +159,39 @@ async def get_paste(slug: str, count_view: bool = False):
     return paste
 
 
-# ---------------- Image endpoints ----------------
-@api_router.post("/paste/{slug}/image")
-async def upload_image(slug: str, file: UploadFile = File(...)):
+# ---------------- File endpoints (any file type) ----------------
+async def _upload_file(slug: str, file: UploadFile):
     paste = await get_paste_doc(slug)
     if not paste:
         raise HTTPException(status_code=404, detail="Paste not found or expired")
 
-    content_type = file.content_type or ""
-    if not content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Only image files are allowed")
-
-    filename = file.filename or "image"
+    content_type = file.content_type or "application/octet-stream"
+    filename = file.filename or "file"
     try:
-        image_id, size = await storage.save_image(slug, filename, content_type, file)
-    except ImageTooLarge:
-        raise HTTPException(status_code=413, detail="Image too large (max 100MB)")
+        file_id, size = await storage.save_file(slug, filename, content_type, file)
+    except FileTooLarge:
+        raise HTTPException(status_code=413, detail="File too large (max 100MB)")
     except Exception as e:
-        logger.error(f"Image upload failed for {slug}: {e}")
-        raise HTTPException(status_code=500, detail="Image upload failed, please try again")
+        logger.error(f"File upload failed for {slug}: {e}")
+        raise HTTPException(status_code=500, detail="File upload failed, please try again")
 
     return {
-        "id": image_id,
-        "url": f"/api/image/{image_id}",
+        "id": file_id,
+        "url": f"/api/file/{file_id}",
         "name": filename,
         "size": size,
         "contentType": content_type,
     }
 
 
-@api_router.get("/image/{image_id}")
-async def get_image(image_id: str):
-    result = await storage.open_image(image_id)
+async def _get_file(file_id: str):
+    result = await storage.open_file(file_id)
     if result is None:
-        raise HTTPException(status_code=404, detail="Image not found")
+        raise HTTPException(status_code=404, detail="File not found")
     content_type, length, iterator = result
     return StreamingResponse(
         iterator,
-        media_type=content_type,
+        media_type=content_type or "application/octet-stream",
         headers={
             "Cache-Control": "public, max-age=31536000, immutable",
             "Content-Length": str(length),
@@ -204,12 +199,48 @@ async def get_image(image_id: str):
     )
 
 
+async def _delete_file(file_id: str):
+    ok = await storage.delete_file(file_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="File not found")
+    return {"ok": True}
+
+
+@api_router.post("/paste/{slug}/file")
+async def upload_file(slug: str, file: UploadFile = File(...)):
+    """Upload any file (max 100MB) attached to a paste."""
+    return await _upload_file(slug, file)
+
+
+@api_router.get("/file/{file_id}")
+async def get_file(file_id: str):
+    """Stream an uploaded file of any type."""
+    return await _get_file(file_id)
+
+
+@api_router.delete("/file/{file_id}")
+async def delete_file(file_id: str):
+    return await _delete_file(file_id)
+
+
+# ---- Legacy image endpoints (kept for old clients / existing pastes) ----
+
+@api_router.post("/paste/{slug}/image")
+async def upload_image(slug: str, file: UploadFile = File(...)):
+    content_type = file.content_type or ""
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image files are allowed")
+    return await _upload_file(slug, file)
+
+
+@api_router.get("/image/{image_id}")
+async def get_image(image_id: str):
+    return await _get_file(image_id)
+
+
 @api_router.delete("/image/{image_id}")
 async def delete_image(image_id: str):
-    ok = await storage.delete_image(image_id)
-    if not ok:
-        raise HTTPException(status_code=404, detail="Image not found")
-    return {"ok": True}
+    return await _delete_file(image_id)
 
 
 # ---------------- WebSocket room manager ----------------

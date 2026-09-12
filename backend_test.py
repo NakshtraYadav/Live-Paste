@@ -430,7 +430,7 @@ async def test_image_get_after_delete(image_id):
             log_fail("Image get after delete", str(e))
 
 async def test_image_upload_non_image(slug):
-    """Test 7e: upload non-image file → 400"""
+    """Test 7e: /image endpoint rejects non-image content types"""
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             files = {"file": ("test.txt", io.BytesIO(b"not an image"), "text/plain")}
@@ -443,7 +443,7 @@ async def test_image_upload_non_image(slug):
             log_fail("Image upload (non-image)", str(e))
 
 async def test_image_upload_unknown_slug():
-    """Test 7f: upload to unknown slug → 404"""
+    """Test 7f: image upload to unknown slug → 404"""
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             png_data = bytes.fromhex(
@@ -460,6 +460,96 @@ async def test_image_upload_unknown_slug():
             log_pass("Image upload (unknown slug)")
         except Exception as e:
             log_fail("Image upload (unknown slug)", str(e))
+
+async def test_file_upload_any_type(slug):
+    """Test 7g: POST /api/paste/{slug}/file with a non-image → any type allowed"""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            files = {"file": ("notes.txt", io.BytesIO(b"hello file world"), "text/plain")}
+            resp = await client.post(f"{API_URL}/paste/{slug}/file", files=files)
+            if resp.status_code != 200:
+                log_fail("File upload (text file)", f"Expected 200, got {resp.status_code}: {resp.text}")
+                return None
+            data = resp.json()
+            for field in ["id", "url", "name", "size", "contentType"]:
+                if field not in data:
+                    log_fail("File upload (text file)", f"Missing '{field}' field")
+                    return None
+            if not data["url"].startswith("/api/file/"):
+                log_fail("File upload (text file)", f"Unexpected url: {data['url']}")
+                return None
+            if not (isinstance(data["id"], str) and len(data["id"]) == 24):
+                log_fail("File upload (text file)", f"Expected 24-char hex id, got: {data['id']}")
+                return None
+            log_pass("File upload (text file)")
+            return data["id"]
+        except Exception as e:
+            log_fail("File upload (text file)", str(e))
+            return None
+
+async def test_file_upload_binary(slug):
+    """Test 7h: upload a binary blob (application/octet-stream) → 200"""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            blob = bytes(range(256)) * 4
+            files = {"file": ("blob.bin", io.BytesIO(blob), "application/octet-stream")}
+            resp = await client.post(f"{API_URL}/paste/{slug}/file", files=files)
+            if resp.status_code != 200:
+                log_fail("File upload (binary)", f"Expected 200, got {resp.status_code}: {resp.text}")
+                return None
+            log_pass("File upload (binary)")
+            return resp.json()["id"]
+        except Exception as e:
+            log_fail("File upload (binary)", str(e))
+            return None
+
+async def test_file_get_roundtrip(file_id, expected_bytes):
+    """Test 7i: GET /api/file/{id} returns exact uploaded bytes"""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            resp = await client.get(f"{API_URL}/file/{file_id}")
+            if resp.status_code != 200:
+                log_fail("File get roundtrip", f"Expected 200, got {resp.status_code}")
+                return False
+            if resp.content != expected_bytes:
+                log_fail("File get roundtrip", "Downloaded bytes do not match uploaded bytes")
+                return False
+            log_pass("File get roundtrip")
+            return True
+        except Exception as e:
+            log_fail("File get roundtrip", str(e))
+            return False
+
+async def test_file_delete(file_id):
+    """Test 7j: DELETE /api/file/{id} → {ok:true}, then GET → 404"""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            resp = await client.delete(f"{API_URL}/file/{file_id}")
+            if resp.status_code != 200 or resp.json().get("ok") is not True:
+                log_fail("File delete", f"Unexpected response: {resp.status_code} {resp.text}")
+                return False
+            resp2 = await client.get(f"{API_URL}/file/{file_id}")
+            if resp2.status_code != 404:
+                log_fail("File delete", f"Expected 404 after delete, got {resp2.status_code}")
+                return False
+            log_pass("File delete")
+            return True
+        except Exception as e:
+            log_fail("File delete", str(e))
+            return False
+
+async def test_file_upload_unknown_slug():
+    """Test 7k: file upload to unknown slug → 404"""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            files = {"file": ("test.txt", io.BytesIO(b"x"), "text/plain")}
+            resp = await client.post(f"{API_URL}/paste/nonexistent-slug-99999/file", files=files)
+            if resp.status_code != 404:
+                log_fail("File upload (unknown slug)", f"Expected 404, got {resp.status_code}")
+                return
+            log_pass("File upload (unknown slug)")
+        except Exception as e:
+            log_fail("File upload (unknown slug)", str(e))
 
 async def test_websocket_existing_slug(slug):
     """Test 8: WebSocket connect to existing slug → receives {type:init, paste:{...}, viewers}"""
@@ -726,6 +816,17 @@ async def run_all_tests():
             await test_image_get_after_delete(image_id)
         await test_image_upload_non_image(random_slug)
     await test_image_upload_unknown_slug()
+
+    # Test 7g-j: Any-file endpoints
+    txt_id = None
+    bin_id = None
+    if random_slug:
+        txt_id = await test_file_upload_any_type(random_slug)
+        bin_id = await test_file_upload_binary(random_slug)
+        if bin_id:
+            await test_file_get_roundtrip(bin_id, bytes(range(256)) * 4)
+            await test_file_delete(bin_id)
+    await test_file_upload_unknown_slug()
     
     # Test 8: WebSocket
     # Create a fresh paste for WebSocket tests

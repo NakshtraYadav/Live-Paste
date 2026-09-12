@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.6.0] - 2026-09
+
+### Added
+- **Share any file type** — upload, paste, or drop any file (PDF, zip, video, audio, Office docs, code archives…) up to 100 MB and it appears inline in the paste as a clean file card with open, download, copy-URL, and delete controls.
+- New `/api/paste/{slug}/file` (upload), `/api/file/{id}` (stream), and `DELETE /api/file/{id}` endpoints; files still flow through the same GridFS (hosted) or on-disk (local) storage as images.
+- Images by extension (`.png`, `.jpg`, `.svg`, …) render as inline previews even when inserted via the file endpoint.
+
+### Changed
+- "Add image" toolbar button is now "Add file" with a paperclip icon; the file picker, clipboard paste handler, and drag-and-drop zone all accept any file type.
+- File deletion cleans up through one shared endpoint; deleting a token also deletes the stored file when no references remain.
+
+### Compatibility
+- All `/api/image/*` endpoints keep working for existing pastes and old clients; legacy image tokens still render as image previews.
+
+---
+
 ## [1.5.0] - 2025-07
 
 ### Added

@@ -1,6 +1,6 @@
 # LivePaste
 
-> **Share text. Edit together. Instantly.**
+> **Share text and files. Edit together. Instantly.**
 
 LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Create a paste, share the link, and everyone with the link can view and edit the content live — no accounts, no sign-up, no install.
 
@@ -13,7 +13,8 @@ LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Cre
 - **Instant live links** — random short slugs by default, or pick a custom slug (e.g. `/my-notes`)
 - **Real-time collaboration** — edits broadcast to all connected clients in under a second via WebSockets
 - **Syntax highlighting** — Prism-powered highlighting for Python, JavaScript, TypeScript, and many more languages
-- **Inline images (Google Docs style)** — paste, drop, or upload screenshots and they render right at your cursor position in the document (up to 100 MB each, stored in GridFS), with hover controls to open, copy URL, or delete
+- **Inline images (Google Docs style)** — paste, drop, or upload screenshots and they render right at your cursor position in the document (up to 100 MB each), with hover controls to open, copy URL, or delete
+- **Share any file** — PDFs, zips, videos, audio, spreadsheets — drop or upload any file type (up to 100 MB) and it appears as a clean file card inline in the paste, with open, download, copy URL, and delete controls
 - **Optional expiry** — auto-delete pastes after 1 hour, 1 day, 1 week, or keep forever
 - **Live presence** — see how many people are viewing right now, plus total views
 - **Editor niceties** — line numbers, status bar (lines / chars / size), copy content & copy link buttons
@@ -60,7 +61,7 @@ livepaste start
   ╰────────────────────────────────────────────────────╯
 ```
 
-- Pastes and images are stored locally in `~/.livepaste` (SQLite + files — nothing else to install)
+- Pastes and files are stored locally in `~/.livepaste` (SQLite + files — nothing else to install)
 - Anyone on your network can open the `Network` URL and collaborate live
 - **Stay up to date:** LivePaste checks this repo's `VERSION` on startup and tells you when a new release is out — update any time with:
 
@@ -111,7 +112,7 @@ livepaste update
 ├── frontend/
 │   ├── src/
 │   │   ├── pages/         # HomePage (create), PastePage (live editor)
-│   │   ├── components/    # InlineBlocksEditor (inline images), ThemeToggle, shadcn/ui
+│   │   ├── components/    # InlineBlocksEditor (inline images & files), ThemeToggle, shadcn/ui
 │   │   └── hooks/         # useTheme, use-toast
 │   └── package.json
 ├── install.sh             # Interactive installer (curl | bash)
@@ -132,9 +133,12 @@ All backend routes are prefixed with `/api`.
 | `GET`    | `/api/health`              | Health check                                                                |
 | `POST`   | `/api/paste`               | Create a paste. Body: `content`, `language`, optional `customSlug`, `expiry` (`1h` \| `1d` \| `1w` \| `never`) |
 | `GET`    | `/api/paste/{slug}`        | Fetch a paste; `?count_view=true` increments the view counter               |
-| `POST`   | `/api/paste/{slug}/image`  | Upload an image (multipart) attached to a paste                             |
-| `GET`    | `/api/image/{image_id}`    | Stream an uploaded image                                                    |
-| `DELETE` | `/api/image/{image_id}`    | Delete an uploaded image                                                    |
+| `POST`   | `/api/paste/{slug}/file`   | Upload **any** file (multipart) attached to a paste                         |
+| `GET`    | `/api/file/{file_id}`      | Stream an uploaded file of any type                                         |
+| `DELETE` | `/api/file/{file_id}`      | Delete an uploaded file                                                     |
+| `POST`   | `/api/paste/{slug}/image`  | Legacy image-only upload (kept for compatibility, redirects to file storage) |
+| `GET`    | `/api/image/{image_id}`    | Legacy alias of `/api/file/{id}` for existing pastes                        |
+| `DELETE` | `/api/image/{image_id}`    | Legacy alias of `DELETE /api/file/{id}`                                     |
 
 ### WebSocket
 
@@ -145,7 +149,7 @@ All backend routes are prefixed with `/api`.
 ### Limits & Rules
 
 - Max paste size: **400 KB**
-- Max image size: **100 MB**
+- Max file size: **100 MB** per uploaded file (any file type allowed)
 - Reserved slugs (`api`, `ws`, `static`, `new`, `about`, …) cannot be claimed
 - Custom slugs are validated; duplicates are rejected
 

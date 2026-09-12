@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger("livepaste.storage")
 
-MAX_IMAGE_SIZE = 100 * 1024 * 1024  # 100MB
+MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB (any file type)
 
 
 def now_utc():
@@ -41,8 +41,12 @@ def _parse_dt(value):
     return dt
 
 
-class ImageTooLarge(Exception):
+class FileTooLarge(Exception):
     pass
+
+
+# Backwards-compatible alias
+ImageTooLarge = FileTooLarge
 
 
 # --------------------------------------------------------------------------
@@ -107,8 +111,8 @@ class MongoStorage:
             {"$set": {"language": language, "updatedAt": _parse_dt(updated_at)}},
         )
 
-    # ---- images ----
-    async def save_image(self, slug: str, filename: str, content_type: str, file):
+    # ---- files (any type; historically "images" — GridFS bucket kept for compatibility) ----
+    async def save_file(self, slug: str, filename: str, content_type: str, file):
         grid_in = self.images_bucket.open_upload_stream(
             filename,
             metadata={
@@ -124,12 +128,12 @@ class MongoStorage:
                 if not chunk:
                     break
                 size += len(chunk)
-                if size > MAX_IMAGE_SIZE:
+                if size > MAX_FILE_SIZE:
                     await grid_in.abort()
-                    raise ImageTooLarge()
+                    raise FileTooLarge()
                 await grid_in.write(chunk)
             await grid_in.close()
-        except ImageTooLarge:
+        except FileTooLarge:
             raise
         except Exception:
             try:
@@ -139,11 +143,14 @@ class MongoStorage:
             raise
         return str(grid_in._id), size
 
-    async def open_image(self, image_id: str):
+    # Legacy alias
+    save_image = save_file
+
+    async def open_file(self, file_id: str):
         from bson import ObjectId
 
         try:
-            oid = ObjectId(image_id)
+            oid = ObjectId(file_id)
             stream = await self.images_bucket.open_download_stream(oid)
         except Exception:
             return None
@@ -159,17 +166,20 @@ class MongoStorage:
 
         return content_type, stream.length, iterator()
 
-    async def delete_image(self, image_id: str) -> bool:
+    async def delete_file(self, file_id: str) -> bool:
         from bson import ObjectId
 
         try:
-            oid = ObjectId(image_id)
+            oid = ObjectId(file_id)
             await self.images_bucket.delete(oid)
             return True
         except Exception:
             return False
 
-    async def purge_paste_images(self, slug: str):
+    # Legacy alias
+    delete_image = delete_file
+
+    async def purge_paste_files(self, slug: str):
         try:
             cursor = self.images_bucket.find({"metadata.slug": slug})
             async for f in cursor:
@@ -303,10 +313,10 @@ class SQLiteStorage:
             )
             await self._conn.commit()
 
-    # ---- images (files on disk, 24-hex ids compatible with the frontend) ----
-    async def save_image(self, slug: str, filename: str, content_type: str, file):
-        image_id = uuid.uuid4().hex[:24]
-        path = self.images_dir / image_id
+    # ---- files (any type; stored on disk, 24-hex ids compatible with the frontend) ----
+    async def save_file(self, slug: str, filename: str, content_type: str, file):
+        file_id = uuid.uuid4().hex[:24]
+        path = self.images_dir / file_id
         size = 0
         try:
             with open(path, "wb") as out:
@@ -315,10 +325,10 @@ class SQLiteStorage:
                     if not chunk:
                         break
                     size += len(chunk)
-                    if size > MAX_IMAGE_SIZE:
-                        raise ImageTooLarge()
+                    if size > MAX_FILE_SIZE:
+                        raise FileTooLarge()
                     out.write(chunk)
-        except ImageTooLarge:
+        except FileTooLarge:
             path.unlink(missing_ok=True)
             raise
         except Exception:
@@ -328,18 +338,21 @@ class SQLiteStorage:
         async with self._lock:
             await self._conn.execute(
                 "INSERT INTO images (id, slug, name, content_type, size, uploaded_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (image_id, slug, filename, content_type, size, now_utc().isoformat()),
+                (file_id, slug, filename, content_type, size, now_utc().isoformat()),
             )
             await self._conn.commit()
-        return image_id, size
+        return file_id, size
 
-    async def open_image(self, image_id: str):
+    # Legacy alias
+    save_image = save_file
+
+    async def open_file(self, file_id: str):
         async with self._lock:
-            cur = await self._conn.execute("SELECT * FROM images WHERE id = ?", (image_id,))
+            cur = await self._conn.execute("SELECT * FROM images WHERE id = ?", (file_id,))
             row = await cur.fetchone()
         if not row:
             return None
-        path = self.images_dir / image_id
+        path = self.images_dir / file_id
         if not path.exists():
             return None
 
@@ -353,17 +366,20 @@ class SQLiteStorage:
 
         return row["content_type"], row["size"], iterator()
 
-    async def delete_image(self, image_id: str) -> bool:
+    async def delete_file(self, file_id: str) -> bool:
         async with self._lock:
-            cur = await self._conn.execute("SELECT 1 FROM images WHERE id = ?", (image_id,))
+            cur = await self._conn.execute("SELECT 1 FROM images WHERE id = ?", (file_id,))
             exists = await cur.fetchone() is not None
             if exists:
-                await self._conn.execute("DELETE FROM images WHERE id = ?", (image_id,))
+                await self._conn.execute("DELETE FROM images WHERE id = ?", (file_id,))
                 await self._conn.commit()
-        (self.images_dir / image_id).unlink(missing_ok=True)
+        (self.images_dir / file_id).unlink(missing_ok=True)
         return exists
 
-    async def purge_paste_images(self, slug: str):
+    # Legacy alias
+    delete_image = delete_file
+
+    async def purge_paste_files(self, slug: str):
         async with self._lock:
             cur = await self._conn.execute("SELECT id FROM images WHERE slug = ?", (slug,))
             rows = await cur.fetchall()
@@ -381,7 +397,7 @@ class SQLiteStorage:
             )
             slugs = [row["slug"] for row in await cur.fetchall()]
         for slug in slugs:
-            await self.purge_paste_images(slug)
+            await self.purge_paste_files(slug)
             await self.delete_paste(slug)
         if slugs:
             logger.info(f"Purged {len(slugs)} expired paste(s)")

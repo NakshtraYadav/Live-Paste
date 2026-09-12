@@ -7,18 +7,48 @@ import React, {
 } from "react";
 import Editor from "react-simple-code-editor";
 import axios from "axios";
-import { ExternalLink, Copy, Trash2 } from "lucide-react";
+import { ExternalLink, Copy, Trash2, File, Download } from "lucide-react";
 import { highlightCode } from "@/lib/prismSetup";
 import { API_BASE } from "@/lib/constants";
 
-// A line that is exactly one image token, e.g. ![name](https://.../api/image/<id>)
+// A line that is exactly one file token:
+//   ![name](https://.../api/image/<24-hex>)   (legacy)
+//   ![name](https://.../api/file/<24-hex>)    (any file type)
 const IMG_LINE_RE = /^\s*!\[([^\]]*)\]\(([^)\s]*\/api\/image\/([a-fA-F0-9]{24}))\)\s*$/;
+const FILE_LINE_RE = /^\s*!\[([^\]]*)\]\(([^)\s]*\/api\/file\/([a-fA-F0-9]{24}))\)\s*$/;
+
+// Extensions/basenames that should be previewed as an image
+const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|svg|avif|ico|heic|heif)$/i;
+
+export const isImageName = (name) => {
+  const n = (name || "").split("?")[0];
+  return IMAGE_EXT_RE.test(n);
+};
+
+const fileIconColor = (name) => {
+  const n = (name || "").toLowerCase();
+  if (/\.(zip|tar|gz|7z|rar|bz2|xz)$/.test(n)) return "#f59e0b"; // archives — amber
+  if (/\.(mp3|wav|ogg|flac|m4a|aac)$/.test(n)) return "#8b5cf6"; // audio — violet
+  if (/\.(mp4|mkv|mov|avi|webm)$/.test(n)) return "#ec4899"; // video — pink
+  if (/\.(pdf)$/.test(n)) return "#ef4444"; // pdf — red
+  if (/\.(docx?|odt|rtf|pages)$/.test(n)) return "#3b82f6"; // docs — blue
+  if (/\.(xlsx?|csv|numbers)$/.test(n)) return "#22c55e"; // sheets — green
+  if (/\.(pptx?|key|odp)$/.test(n)) return "#f97316"; // slides — orange
+  if (/\.(json|ya?ml|xml|csv|tsv|env|ini|toml|log|txt|md)$/.test(n)) return "#06b6d4"; // text data — cyan
+  return "hsl(var(--muted-foreground))";
+};
+
+const formatBytes = (bytes) => {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
 
 /**
  * Parse content into an alternating list of blocks:
- *   [text, image, text, image, ..., text]
+ *   [text, file, text, file, ..., text]
  * Text blocks: { type: "text", value: string | null }  (null = zero lines)
- * Image blocks: { type: "image", raw, name, url, id }
+ * File blocks: { type: "image" | "file", raw, name, url, id }
  * parse -> join is lossless.
  */
 export function parseBlocks(content) {
@@ -30,13 +60,13 @@ export function parseBlocks(content) {
     buf = null;
   };
   for (const line of lines) {
-    const m = line.match(IMG_LINE_RE);
+    const m = line.match(FILE_LINE_RE) || line.match(IMG_LINE_RE);
     if (m) {
       flushText();
       blocks.push({
-        type: "image",
+        type: m[0].includes("/api/image/") ? "image" : "file",
         raw: line,
-        name: m[1] || "image",
+        name: m[1] || "file",
         url: m[2],
         id: m[3],
       });
@@ -52,14 +82,16 @@ export function parseBlocks(content) {
 export function blocksToContent(blocks) {
   const lines = [];
   for (const b of blocks) {
-    if (b.type === "image") lines.push(b.raw);
+    if (b.type === "image" || b.type === "file") lines.push(b.raw);
     else if (b.value !== null) lines.push(...b.value.split("\n"));
   }
   return lines.join("\n");
 }
 
+const isFileBlock = (b) => b.type === "image" || b.type === "file";
+
 const lineCountOf = (block) => {
-  if (block.type === "image") return 1;
+  if (isFileBlock(block)) return 1;
   if (block.value === null) return 0;
   return block.value.split("\n").length;
 };
@@ -121,15 +153,15 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
     [blocks, commit, focusTextAt],
   );
 
-  // ---- imperative API: insert an image token at the current caret ----
+  // ---- imperative API: insert a file/image token at the current caret ----
   useImperativeHandle(ref, () => ({
     insertImageToken(token) {
-      const m = token.match(IMG_LINE_RE);
+      const m = token.match(FILE_LINE_RE) || token.match(IMG_LINE_RE);
       if (!m) return;
-      const imgBlock = {
-        type: "image",
+      const fileBlock = {
+        type: m[0].includes("/api/image/") ? "image" : "file",
         raw: token,
-        name: m[1] || "image",
+        name: m[1] || "file",
         url: m[2],
         id: m[3],
       };
@@ -154,7 +186,7 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
         next = [
           ...blocks.slice(0, f.index),
           beforeBlock,
-          imgBlock,
+          fileBlock,
           afterBlock,
           ...blocks.slice(f.index + 1),
         ];
@@ -163,22 +195,26 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
         // Append at the end of the document
         const last = blocks[blocks.length - 1];
         if (blocks.length === 1 && (last.value === "" || last.value === null)) {
-          next = [{ type: "text", value: null }, imgBlock, { type: "text", value: "" }];
+          next = [{ type: "text", value: null }, fileBlock, { type: "text", value: "" }];
         } else {
-          next = [...blocks, imgBlock, { type: "text", value: "" }];
+          next = [...blocks, fileBlock, { type: "text", value: "" }];
         }
         focusIndex = next.length - 1;
       }
       commit(next);
       focusTextAt(focusIndex, 0);
     },
+    insertFileToken(token) {
+      // Alias — same behavior, clearer name for non-image files
+      return this.insertImageToken(token);
+    },
   }));
 
-  // ---- delete an image block by its position; clean up file if orphaned ----
-  const removeImageBlockAt = useCallback(
+  // ---- delete a file block by its position; clean up file if orphaned ----
+  const removeFileBlockAt = useCallback(
     (index) => {
-      const img = blocks[index];
-      if (!img || img.type !== "image") return;
+      const blk = blocks[index];
+      if (!isFileBlock(blk)) return;
       // Merge surrounding text blocks (they always exist by construction)
       const prev = blocks[index - 1];
       const nextB = blocks[index + 1];
@@ -194,9 +230,14 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
       ];
       const newContent = blocksToContent(next);
       onChange(newContent);
-      // If the image no longer appears anywhere, delete the stored file
-      if (!newContent.includes(`/api/image/${img.id}`)) {
-        axios.delete(`${API_BASE}/api/image/${img.id}`).catch(() => {});
+      // If the file no longer appears anywhere, delete the stored file
+      if (
+        !newContent.includes(`/api/file/${blk.id}`) &&
+        !newContent.includes(`/api/image/${blk.id}`)
+      ) {
+        axios
+          .delete(blk.url.startsWith("http") ? blk.url : `${API_BASE}${blk.url}`)
+          .catch(() => {});
       }
       focusTextAt(index - 1, caretPos);
     },
@@ -220,12 +261,12 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
 
     if (e.key === "Backspace" && atStart && index > 0) {
       e.preventDefault();
-      removeImageBlockAt(index - 1);
+      removeFileBlockAt(index - 1);
       return;
     }
     if (e.key === "Delete" && atEnd && index < blocks.length - 1) {
       e.preventDefault();
-      removeImageBlockAt(index + 1);
+      removeFileBlockAt(index + 1);
       return;
     }
     if ((e.key === "ArrowUp" && onFirstLine) || (e.key === "ArrowLeft" && atStart)) {
@@ -254,6 +295,126 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
     commit(next);
   };
 
+  // ---- render: a file block as an image preview or a file card ----
+  const renderFileBlock = (block, index, startLine) => {
+    const previewAsImage =
+      block.type === "image" || isImageName(block.name);
+
+    return (
+      <div className="lp-block-row" key={`${block.type}-${block.id}-${index}`}>
+        <div
+          className="lp-gutter-cell"
+          style={{ width: gutterWidth }}
+          aria-hidden="true"
+        >
+          <div>{startLine}</div>
+        </div>
+        <div className="lp-image-cell flex-1">
+          {previewAsImage ? (
+            <div
+              className="lp-inline-image group"
+              data-testid={`paste-inline-image-${block.id}`}
+            >
+              <img
+                src={block.url}
+                alt={block.name}
+                loading="lazy"
+                draggable={false}
+              />
+              <div className="lp-image-actions opacity-0 group-hover:opacity-100">
+                <button
+                  type="button"
+                  aria-label={`Open ${block.name}`}
+                  title="Open full size"
+                  onClick={() => window.open(block.url, "_blank")}
+                  data-testid={`paste-inline-image-open-${block.id}`}
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Copy URL of ${block.name}`}
+                  title="Copy file URL"
+                  onClick={() => onCopyImageUrl(block)}
+                  data-testid={`paste-inline-image-copy-${block.id}`}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  className="lp-danger"
+                  aria-label={`Delete ${block.name}`}
+                  title="Delete file"
+                  onClick={() => onDeleteImage(block)}
+                  data-testid={`paste-inline-image-delete-${block.id}`}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div
+              className="lp-inline-file group"
+              data-testid={`paste-inline-file-${block.id}`}
+            >
+              <span
+                className="lp-file-icon"
+                style={{ color: fileIconColor(block.name) }}
+                aria-hidden="true"
+              >
+                <File className="h-5 w-5" />
+              </span>
+              <div className="lp-file-meta min-w-0">
+                <span className="lp-file-name truncate">{block.name}</span>
+                <span className="lp-file-url truncate">{block.url}</span>
+              </div>
+              <div className="lp-image-actions lp-file-actions">
+                <button
+                  type="button"
+                  aria-label={`Open ${block.name}`}
+                  title="Open in new tab"
+                  onClick={() => window.open(block.url, "_blank")}
+                  data-testid={`paste-inline-file-open-${block.id}`}
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </button>
+                <a
+                  href={block.url}
+                  download={block.name}
+                  aria-label={`Download ${block.name}`}
+                  title="Download"
+                  className="lp-file-download"
+                  data-testid={`paste-inline-file-download-${block.id}`}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                </a>
+                <button
+                  type="button"
+                  aria-label={`Copy URL of ${block.name}`}
+                  title="Copy file URL"
+                  onClick={() => onCopyImageUrl(block)}
+                  data-testid={`paste-inline-file-copy-${block.id}`}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  className="lp-danger"
+                  aria-label={`Delete ${block.name}`}
+                  title="Delete file"
+                  onClick={() => onDeleteImage(block)}
+                  data-testid={`paste-inline-file-delete-${block.id}`}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   // ---- render ----
   let lineNo = 1;
   const isSingleEmptyDoc = blocks.length === 1;
@@ -271,64 +432,11 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
         const n = lineCountOf(block);
         lineNo += n;
 
-        if (block.type === "image") {
-          return (
-            <div className="lp-block-row" key={`img-${block.id}-${index}`}>
-              <div
-                className="lp-gutter-cell"
-                style={{ width: gutterWidth }}
-                aria-hidden="true"
-              >
-                <div>{startLine}</div>
-              </div>
-              <div className="lp-image-cell flex-1">
-                <div
-                  className="lp-inline-image group"
-                  data-testid={`paste-inline-image-${block.id}`}
-                >
-                  <img
-                    src={block.url}
-                    alt={block.name}
-                    loading="lazy"
-                    draggable={false}
-                  />
-                  <div className="lp-image-actions opacity-0 group-hover:opacity-100">
-                    <button
-                      type="button"
-                      aria-label={`Open ${block.name}`}
-                      title="Open full size"
-                      onClick={() => window.open(block.url, "_blank")}
-                      data-testid={`paste-inline-image-open-${block.id}`}
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Copy URL of ${block.name}`}
-                      title="Copy image URL"
-                      onClick={() => onCopyImageUrl(block)}
-                      data-testid={`paste-inline-image-copy-${block.id}`}
-                    >
-                      <Copy className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      className="lp-danger"
-                      aria-label={`Delete ${block.name}`}
-                      title="Delete image"
-                      onClick={() => onDeleteImage(block)}
-                      data-testid={`paste-inline-image-delete-${block.id}`}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
+        if (isFileBlock(block)) {
+          return renderFileBlock(block, index, startLine);
         }
 
-        // Zero-line text block: slim click-to-type zone between/around images
+        // Zero-line text block: slim click-to-type zone between/around files
         if (block.value === null) {
           return (
             <div className="lp-block-row" key={`null-${index}`}>

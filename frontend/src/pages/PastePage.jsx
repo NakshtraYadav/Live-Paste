@@ -13,7 +13,7 @@ import {
   WifiOff,
   Home,
   Loader2,
-  ImagePlus,
+  Paperclip,
   UploadCloud,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -37,7 +37,7 @@ import {
 
 const DEBOUNCE_MS = 250;
 const PING_INTERVAL_MS = 25000;
-const MAX_IMAGE_SIZE = 100 * 1024 * 1024; // 100MB
+const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
 
 const formatBytes = (bytes) => {
   if (bytes < 1024) return `${bytes} B`;
@@ -251,15 +251,11 @@ export default function PastePage() {
     }
   };
 
-  // ---- images: upload ----
-  const uploadImage = useCallback(
+  // ---- files (any type): upload ----
+  const uploadFile = useCallback(
     async (file) => {
       if (!file) return;
-      if (!file.type.startsWith("image/")) {
-        toast.error(`"${file.name}" is not an image`);
-        return;
-      }
-      if (file.size > MAX_IMAGE_SIZE) {
+      if (file.size > MAX_FILE_SIZE) {
         toast.error(`"${file.name}" is over the 100MB limit`);
         return;
       }
@@ -267,19 +263,20 @@ export default function PastePage() {
       form.append("file", file);
       setUploadPct(0);
       try {
-        const res = await axios.post(`${API_BASE}/api/paste/${slug}/image`, form, {
+        const res = await axios.post(`${API_BASE}/api/paste/${slug}/file`, form, {
           onUploadProgress: (e) => {
             if (e.total) setUploadPct(Math.round((e.loaded / e.total) * 100));
           },
         });
-        const { id, name } = res.data;
-        const safeName = (name || "image").replace(/[[\]()]/g, "_");
-        editorApiRef.current?.insertImageToken(
-          `![${safeName}](${API_BASE}/api/image/${id})`,
+        const { id, name, contentType } = res.data;
+        const safeName = (name || "file").replace(/[[\]()]/g, "_");
+        const endpoint = (contentType || file.type || "").startsWith("image/") ? "image" : "file";
+        editorApiRef.current?.insertFileToken(
+          `![${safeName}](${API_BASE}/api/${endpoint}/${id})`,
         );
-        toast.success(`Image "${name}" added`);
+        toast.success(`File "${name}" added`);
       } catch (err) {
-        const msg = err?.response?.data?.detail || "Image upload failed";
+        const msg = err?.response?.data?.detail || "File upload failed";
         toast.error(msg);
       } finally {
         setUploadPct(null);
@@ -294,33 +291,33 @@ export default function PastePage() {
       if (!list.length) return;
       for (const f of list) {
         // eslint-disable-next-line no-await-in-loop
-        await uploadImage(f);
+        await uploadFile(f);
       }
     },
-    [uploadImage],
+    [uploadFile],
   );
 
-  // ---- images: paste from clipboard ----
+  // ---- files: paste from clipboard ----
   const handlePaste = useCallback(
     (e) => {
       const items = e.clipboardData?.items;
       if (!items) return;
-      const imageFiles = [];
+      const droppedFiles = [];
       for (const item of items) {
-        if (item.kind === "file" && item.type.startsWith("image/")) {
+        if (item.kind === "file") {
           const f = item.getAsFile();
-          if (f) imageFiles.push(f);
+          if (f) droppedFiles.push(f);
         }
       }
-      if (imageFiles.length) {
+      if (droppedFiles.length) {
         e.preventDefault();
-        uploadFiles(imageFiles);
+        uploadFiles(droppedFiles);
       }
     },
     [uploadFiles],
   );
 
-  // ---- images: drag & drop ----
+  // ---- files: drag & drop ----
   const handleDragEnter = (e) => {
     e.preventDefault();
     dragDepthRef.current += 1;
@@ -343,26 +340,26 @@ export default function PastePage() {
     }
   };
 
-  // ---- images: delete ----
-  const handleDeleteImage = async (img) => {
-    // Remove every occurrence of this image's token from the text
+  // ---- files: delete ----
+  const handleDeleteFile = async (file) => {
+    // Remove every occurrence of this file's token (image or file URL) from the text
     const re = new RegExp(
-      `!\\[[^\\]]*\\]\\([^)\\s]*\\/api\\/image\\/${img.id}\\)\\n?`,
+      `!\\[[^\\]]*\\]\\([^)\\s]*\\/api\\/(?:image|file)\\/${file.id}\\)\\n?`,
       "g",
     );
     const newContent = contentRef.current.replace(re, "");
     applyContent(newContent);
     try {
-      await axios.delete(`${API_BASE}/api/image/${img.id}`);
-      toast.success(`Image "${img.name}" deleted`);
+      await axios.delete(`${API_BASE}/api/file/${file.id}`);
+      toast.success(`File "${file.name}" deleted`);
     } catch (err) {
-      toast.error("Could not delete image file (reference removed)");
+      toast.error("Could not delete file (reference removed)");
     }
   };
 
-  const handleCopyImageUrl = async (img) => {
-    const ok = await copyToClipboard(`${API_BASE}/api/image/${img.id}`);
-    if (ok) toast.success("Image URL copied");
+  const handleCopyFileUrl = async (file) => {
+    const ok = await copyToClipboard(`${API_BASE}/api/file/${file.id}`);
+    if (ok) toast.success("File URL copied");
     else toast.error("Could not copy URL");
   };
 
@@ -504,21 +501,20 @@ export default function PastePage() {
               variant="outline"
               size="sm"
               onClick={() => fileInputRef.current?.click()}
-              data-testid="paste-toolbar-add-image-button"
+              data-testid="paste-toolbar-add-file-button"
               className="shrink-0 active:scale-[0.98]"
-              aria-label="Add image"
+              aria-label="Add file"
               disabled={uploadPct !== null}
             >
-              <ImagePlus className="h-3.5 w-3.5 sm:mr-1.5" />
-              <span className="hidden sm:inline">Add image</span>
+              <Paperclip className="h-3.5 w-3.5 sm:mr-1.5" />
+              <span className="hidden sm:inline">Add file</span>
             </Button>
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
               multiple
               className="hidden"
-              data-testid="paste-image-file-input"
+              data-testid="paste-file-input"
               onChange={(e) => {
                 uploadFiles(e.target.files);
                 e.target.value = "";
@@ -610,10 +606,10 @@ export default function PastePage() {
           ref={editorApiRef}
           content={content}
           language={language}
-          placeholder="Start typing — everyone with this link sees it live. Paste or drop screenshots right here…"
+          placeholder="Start typing — everyone with this link sees it live. Paste or drop files right here…"
           onChange={applyContent}
-          onDeleteImage={handleDeleteImage}
-          onCopyImageUrl={handleCopyImageUrl}
+          onDeleteImage={handleDeleteFile}
+          onCopyImageUrl={handleCopyFileUrl}
         />
 
         {dragging && (
@@ -623,7 +619,7 @@ export default function PastePage() {
           >
             <div className="flex flex-col items-center gap-2 text-primary">
               <UploadCloud className="h-8 w-8" />
-              <p className="text-sm font-medium">Drop images to add them to this paste</p>
+              <p className="text-sm font-medium">Drop files to add them to this paste</p>
             </div>
           </div>
         )}
@@ -639,7 +635,7 @@ export default function PastePage() {
           {charCount > 0 ? ` · ${formatBytes(new Blob([content]).size)}` : ""}
         </span>
         <span className="font-mono text-xs text-muted-foreground hidden sm:inline">
-          paste or drop images · Ctrl+V screenshots supported
+          paste or drop any file · images, PDFs, zips, everything
         </span>
       </div>
     </div>
