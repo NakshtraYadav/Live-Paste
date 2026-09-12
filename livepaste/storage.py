@@ -164,7 +164,7 @@ class MongoStorage:
                     break
                 yield chunk
 
-        return content_type, stream.length, iterator()
+        return content_type, stream.length, iterator(), stream.filename
 
     async def delete_file(self, file_id: str) -> bool:
         from bson import ObjectId
@@ -364,7 +364,7 @@ class SQLiteStorage:
                         break
                     yield chunk
 
-        return row["content_type"], row["size"], iterator()
+        return row["content_type"], row["size"], iterator(), row["name"]
 
     async def delete_file(self, file_id: str) -> bool:
         async with self._lock:

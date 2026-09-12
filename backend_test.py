@@ -538,6 +538,101 @@ async def test_file_delete(file_id):
             log_fail("File delete", str(e))
             return False
 
+MZ_HEADER = b"MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00\xff\xff\x00\x00"  # PE executable header
+
+async def test_file_exe_upload(slug):
+    """Test 7l: Windows .exe binary → accepted, byte-perfect roundtrip, downloads"""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            exe = MZ_HEADER + bytes(range(256)) * 2  # fake PE binary with MZ header
+            files = {"file": ("setup.exe", io.BytesIO(exe), "application/vnd.microsoft.portable-executable")}
+            resp = await client.post(f"{API_URL}/paste/{slug}/file", files=files)
+            if resp.status_code != 200:
+                log_fail("File upload (.exe)", f"Expected 200, got {resp.status_code}: {resp.text}")
+                return False
+            fid = resp.json()["id"]
+            dl = await client.get(f"{API_URL}/file/{fid}")
+            if dl.content != exe:
+                log_fail("File upload (.exe)", "Downloaded bytes do not match")
+                return False
+            disp = dl.headers.get("content-disposition", "")
+            if not disp.startswith("attachment") or "setup.exe" not in disp:
+                log_fail("File upload (.exe)", f"Expected attachment disposition with filename, got: {disp}")
+                return False
+            log_pass("File upload (.exe)")
+            await client.delete(f"{API_URL}/file/{fid}")
+            return True
+        except Exception as e:
+            log_fail("File upload (.exe)", str(e))
+            return False
+
+async def test_file_unknown_extension(slug):
+    """Test 7m: made-up extensions (.vyb, .xyz123) → accepted like anything else"""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            for name in ("archive.vyb", "data.xyz123"):
+                files = {"file": (name, io.BytesIO(b"\x00\x01\x02 payload"), "application/octet-stream")}
+                resp = await client.post(f"{API_URL}/paste/{slug}/file", files=files)
+                if resp.status_code != 200:
+                    log_fail("File upload (unknown ext)", f"{name}: expected 200, got {resp.status_code}")
+                    return False
+            log_pass("File upload (unknown ext)")
+            return True
+        except Exception as e:
+            log_fail("File upload (unknown ext)", str(e))
+            return False
+
+async def test_file_no_extension_and_unicode(slug):
+    """Test 7n: no extension + unicode/emoji names → accepted, name preserved"""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            cases = ["Makefile", "रिपोर्ट लेख.txt", "🚀 launch plan.md"]
+            ids = []
+            for name in cases:
+                files = {"file": (name, io.BytesIO(b"content"), "application/octet-stream")}
+                resp = await client.post(f"{API_URL}/paste/{slug}/file", files=files)
+                if resp.status_code != 200:
+                    log_fail("File upload (no-ext/unicode)", f"{name!r}: expected 200, got {resp.status_code}")
+                    return False
+                if resp.json()["name"] != name:
+                    log_fail("File upload (no-ext/unicode)", f"Name changed: {resp.json()['name']!r}")
+                    return False
+                ids.append(resp.json()["id"])
+            # Unicode name must survive the download headers round-trip
+            dl = await client.get(f"{API_URL}/file/{ids[-1]}")
+            if "filename*=UTF-8''" not in dl.headers.get("content-disposition", ""):
+                log_fail("File upload (no-ext/unicode)", "Missing RFC 5987 filename* for unicode name")
+                return False
+            log_pass("File upload (no-ext/unicode)")
+            for fid in ids:
+                await client.delete(f"{API_URL}/file/{fid}")
+            return True
+        except Exception as e:
+            log_fail("File upload (no-ext/unicode)", str(e))
+            return False
+
+async def test_file_zero_bytes_and_path_names(slug):
+    """Test 7o: empty file + path-like/hidden names → accepted, sanitized safely"""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            # Empty file
+            files = {"file": ("empty.bin", io.BytesIO(b""), "application/octet-stream")}
+            resp = await client.post(f"{API_URL}/paste/{slug}/file", files=files)
+            if resp.status_code != 200 or resp.json()["size"] != 0:
+                log_fail("File upload (empty)", f"Expected 200/size 0, got {resp.status_code}")
+                return False
+            # Path traversal-style name must be flattened, not rejected
+            files = {"file": ("../../etc/passwd", io.BytesIO(b"x"), "application/octet-stream")}
+            resp = await client.post(f"{API_URL}/paste/{slug}/file", files=files)
+            if resp.status_code != 200 or resp.json()["name"] != "passwd":
+                log_fail("File upload (path name)", f"Expected flattened 'passwd', got {resp.status_code} {resp.text}")
+                return False
+            log_pass("File upload (empty + path name)")
+            return True
+        except Exception as e:
+            log_fail("File upload (empty + path name)", str(e))
+            return False
+
 async def test_file_upload_unknown_slug():
     """Test 7k: file upload to unknown slug → 404"""
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -827,6 +922,13 @@ async def run_all_tests():
             await test_file_get_roundtrip(bin_id, bytes(range(256)) * 4)
             await test_file_delete(bin_id)
     await test_file_upload_unknown_slug()
+
+    # Test 7l-o: truly-anything file coverage (executables, odd names, edge cases)
+    if random_slug:
+        await test_file_exe_upload(random_slug)
+        await test_file_unknown_extension(random_slug)
+        await test_file_no_extension_and_unicode(random_slug)
+        await test_file_zero_bytes_and_path_names(random_slug)
     
     # Test 8: WebSocket
     # Create a fresh paste for WebSocket tests

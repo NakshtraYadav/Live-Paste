@@ -273,6 +273,17 @@
   max-width: 420px;
 }
 
+.lp-file-ext {
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  padding: 1px 5px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  opacity: 0.85;
+}
+
 .lp-file-actions {
   position: absolute;
   top: 50%;

@@ -14,7 +14,7 @@ LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Cre
 - **Real-time collaboration** — edits broadcast to all connected clients in under a second via WebSockets
 - **Syntax highlighting** — Prism-powered highlighting for Python, JavaScript, TypeScript, and many more languages
 - **Inline images (Google Docs style)** — paste, drop, or upload screenshots and they render right at your cursor position in the document (up to 100 MB each), with hover controls to open, copy URL, or delete
-- **Share any file** — PDFs, zips, videos, audio, spreadsheets — drop or upload any file type (up to 100 MB) and it appears as a clean file card inline in the paste, with open, download, copy URL, and delete controls
+- **Share any file — literally any** — PDFs, zips, videos, audio, spreadsheets, `.exe` binaries, ROMs, files with no extension, unicode/emoji names — every file type is accepted (up to 100 MB) and appears as a clean file card inline in the paste, with an extension badge plus open, download, copy URL, and delete controls
 - **Optional expiry** — auto-delete pastes after 1 hour, 1 day, 1 week, or keep forever
 - **Live presence** — see how many people are viewing right now, plus total views
 - **Editor niceties** — line numbers, status bar (lines / chars / size), copy content & copy link buttons
@@ -149,7 +149,7 @@ All backend routes are prefixed with `/api`.
 ### Limits & Rules
 
 - Max paste size: **400 KB**
-- Max file size: **100 MB** per uploaded file (any file type allowed)
+- Max file size: **100 MB** per uploaded file — **no file type is ever rejected**; unknown extensions, executables, and extensionless files all work. Filenames are sanitized of path components/control chars only.
 - Reserved slugs (`api`, `ws`, `static`, `new`, `about`, …) cannot be claimed
 - Custom slugs are validated; duplicates are rejected
 

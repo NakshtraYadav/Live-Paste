@@ -25,6 +25,13 @@ export const isImageName = (name) => {
   return IMAGE_EXT_RE.test(n);
 };
 
+// Uppercased extension badge, e.g. "PDF", "EXE", "VYB"; "BIN" when none
+export const extOf = (name) => {
+  const n = (name || "").split("?")[0];
+  const m = n.match(/\.([A-Za-z0-9]{1,12})$/);
+  return m ? m[1].toUpperCase() : "BIN";
+};
+
 const fileIconColor = (name) => {
   const n = (name || "").toLowerCase();
   if (/\.(zip|tar|gz|7z|rar|bz2|xz)$/.test(n)) return "#f59e0b"; // archives — amber
@@ -365,7 +372,15 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
                 <File className="h-5 w-5" />
               </span>
               <div className="lp-file-meta min-w-0">
-                <span className="lp-file-name truncate">{block.name}</span>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="lp-file-name truncate">{block.name}</span>
+                  <span
+                    className="lp-file-ext shrink-0"
+                    style={{ color: fileIconColor(block.name) }}
+                  >
+                    {extOf(block.name)}
+                  </span>
+                </div>
                 <span className="lp-file-url truncate">{block.url}</span>
               </div>
               <div className="lp-image-actions lp-file-actions">

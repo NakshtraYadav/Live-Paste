@@ -13,6 +13,9 @@ import random
 import string
 import logging
 import asyncio
+import mimetypes
+import unicodedata
+from urllib.parse import quote
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Set
@@ -65,6 +68,31 @@ STATIC_DIR = Path(__file__).parent / "static"
 def gen_slug(length: int = 7) -> str:
     alphabet = string.ascii_letters + string.digits
     return "".join(random.choices(alphabet, k=length))
+
+
+def sanitize_filename(name: Optional[str]) -> str:
+    """Accept ANY filename — executables, no extension, unicode, emoji.
+
+    Only strips path components and non-printable control characters so the
+    name is safe to store and return in HTTP headers. Extension and type are
+    never used to accept/reject a file.
+    """
+    name = (name or "file").replace("\\", "/").split("/")[-1]
+    name = "".join(ch for ch in name if ch.isprintable())
+    name = name.strip().lstrip(".") or "file"  # avoid hidden/empty names
+    return name[:255]
+
+
+# Content types that must download instead of rendering on our origin
+_UNSAFE_INLINE_TYPES = ("html", "xml", "xhtml", "svg")
+
+
+def _content_disposition(content_type: str, filename: str) -> str:
+    ctype = (content_type or "").lower()
+    forced_download = any(t in ctype for t in _UNSAFE_INLINE_TYPES)
+    dtype = "attachment" if forced_download else "inline"
+    ascii_name = filename.encode("ascii", "ignore").decode().strip() or "file"
+    return f'{dtype}; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(filename)}'
 
 
 def is_expired(paste: dict) -> bool:
@@ -165,8 +193,11 @@ async def _upload_file(slug: str, file: UploadFile):
     if not paste:
         raise HTTPException(status_code=404, detail="Paste not found or expired")
 
-    content_type = file.content_type or "application/octet-stream"
-    filename = file.filename or "file"
+    filename = sanitize_filename(file.filename)
+    # Trust the browser's type when present; otherwise guess from the
+    # extension (works for .exe, .deb, .apk, ...) and fall back to a generic
+    # binary type. The type is NEVER used to reject an upload.
+    content_type = file.content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream"
     try:
         file_id, size = await storage.save_file(slug, filename, content_type, file)
     except FileTooLarge:
@@ -188,13 +219,15 @@ async def _get_file(file_id: str):
     result = await storage.open_file(file_id)
     if result is None:
         raise HTTPException(status_code=404, detail="File not found")
-    content_type, length, iterator = result
+    content_type, length, iterator, filename = result
     return StreamingResponse(
         iterator,
         media_type=content_type or "application/octet-stream",
         headers={
             "Cache-Control": "public, max-age=31536000, immutable",
             "Content-Length": str(length),
+            "Content-Disposition": _content_disposition(content_type or "", filename or "file"),
+            "X-Content-Type-Options": "nosniff",
         },
     )
 

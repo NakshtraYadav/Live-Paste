@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Share any file type** — upload, paste, or drop any file (PDF, zip, video, audio, Office docs, code archives…) up to 100 MB and it appears inline in the paste as a clean file card with open, download, copy-URL, and delete controls.
 - New `/api/paste/{slug}/file` (upload), `/api/file/{id}` (stream), and `DELETE /api/file/{id}` endpoints; files still flow through the same GridFS (hosted) or on-disk (local) storage as images.
+- **No file type is ever rejected** — executables (`.exe`, `.apk`, `.deb`), unknown extensions (`.vyb`, `.xyz123`), extensionless files, unicode/emoji names, and zero-byte files all upload and download byte-perfect. Filenames are sanitized (path components/control chars stripped) and downloads use RFC 5987 headers so unicode names survive.
+- Executables and other non-previewable types download with `Content-Disposition: attachment`; HTML/XML/SVG are forced to download too (never render on our origin) alongside a `nosniff` header.
+- File cards now show an uppercase extension badge (PDF, EXE, VYB, BIN…) color-coded by category.
 - Images by extension (`.png`, `.jpg`, `.svg`, …) render as inline previews even when inserted via the file endpoint.
 
 ### Changed
