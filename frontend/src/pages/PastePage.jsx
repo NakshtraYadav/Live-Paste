@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { toast } from "sonner";
+import * as Y from "yjs";
 import {
   Link2,
   Copy,
@@ -15,6 +16,13 @@ import {
   Loader2,
   Paperclip,
   UploadCloud,
+  History,
+  KeyRound,
+  Pencil,
+  Eye as EyeIcon,
+  X,
+  RotateCcw,
+  ArrowUpCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +35,7 @@ import {
 } from "@/components/ui/select";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import InlineBlocksEditor from "@/components/InlineBlocksEditor";
+import useCollab from "@/hooks/useCollab";
 import {
   LANGUAGES,
   API_BASE,
@@ -38,6 +47,47 @@ import {
 const DEBOUNCE_MS = 250;
 const PING_INTERVAL_MS = 25000;
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+
+const editTokenStore = {
+  save: (slug, token) => {
+    try {
+      localStorage.setItem(`lp_edit_${slug}`, token);
+    } catch (e) {
+      /* private mode */
+    }
+  },
+  get: (slug) => {
+    try {
+      return localStorage.getItem(`lp_edit_${slug}`) || "";
+    } catch (e) {
+      return "";
+    }
+  },
+  clear: (slug) => {
+    try {
+      localStorage.removeItem(`lp_edit_${slug}`);
+    } catch (e) {
+      /* ignore */
+    }
+  },
+};
+
+// Accept ?edit=<token> in the URL and persist it (share-able edit links)
+const consumeEditTokenFromUrl = (slug) => {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const t = params.get("edit");
+    if (t) {
+      editTokenStore.save(slug, t);
+      params.delete("edit");
+      const qs = params.toString();
+      window.history.replaceState({}, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
+    }
+  } catch (e) {
+    /* ignore */
+  }
+  return editTokenStore.get(slug);
+};
 
 const formatBytes = (bytes) => {
   if (bytes < 1024) return `${bytes} B`;
@@ -59,8 +109,17 @@ export default function PastePage() {
   const [connState, setConnState] = useState("connecting"); // connecting | connected | reconnecting | disconnected
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedContent, setCopiedContent] = useState(false);
+  const [copiedEdit, setCopiedEdit] = useState(false);
   const [uploadPct, setUploadPct] = useState(null); // null = not uploading
   const [dragging, setDragging] = useState(false);
+  const [canEdit, setCanEdit] = useState(false);
+  const [editToken, setEditToken] = useState("");
+  const [showHistory, setShowHistory] = useState(false);
+  const [revisions, setRevisions] = useState(null); // null = not loaded
+  const [revLoading, setRevLoading] = useState(false);
+  const [serverVersion, setServerVersion] = useState(null);
+  const [latestRelease, setLatestRelease] = useState(null);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
 
   const wsRef = useRef(null);
   const debounceRef = useRef(null);
@@ -72,45 +131,50 @@ export default function PastePage() {
   const editorApiRef = useRef(null);
   const fileInputRef = useRef(null);
   const dragDepthRef = useRef(0);
+  const ydocRef = useRef(new Y.Doc());
+  const applyingRemoteRef = useRef(false);
 
   useEffect(() => {
     document.title = `/${slug} — LivePaste`;
+    setEditToken(consumeEditTokenFromUrl(slug));
+    // Fresh Y.Doc per paste
+    ydocRef.current = new Y.Doc();
+    return () => {
+      ydocRef.current.destroy();
+      ydocRef.current = new Y.Doc();
+    };
   }, [slug]);
 
-  // ---- initial REST load (handles view counting once per session) ----
+  // ---- server version + latest release (update banner) ----
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
+    const check = async () => {
       try {
-        const viewedKey = `lp_viewed_${slug}`;
-        const alreadyViewed = sessionStorage.getItem(viewedKey);
-        const res = await axios.get(`${API_BASE}/api/paste/${slug}`, {
-          params: { count_view: alreadyViewed ? false : true },
-        });
-        if (cancelled) return;
-        sessionStorage.setItem(viewedKey, "1");
-        const p = res.data;
-        setContent(p.content);
-        contentRef.current = p.content;
-        setLanguage(p.language || "plaintext");
-        setViews(p.views || 0);
-        setExpiresAt(p.expiresAt);
-        setStatus("ready");
-      } catch (err) {
-        if (cancelled) return;
-        setStatus("notfound");
+        const v = await axios.get(`${API_BASE}/api/version`);
+        if (!cancelled) setServerVersion(v.data.version);
+      } catch (e) {
+        /* older server */
+      }
+      try {
+        const r = await axios.get(
+          "https://api.github.com/repos/NakshtraYadav/Live-Paste/releases/latest",
+        );
+        if (!cancelled) setLatestRelease(r.data.tag_name?.replace(/^v/, ""));
+      } catch (e) {
+        /* offline or no releases */
       }
     };
-    load();
+    check();
     return () => {
       cancelled = true;
     };
-  }, [slug]);
+  }, []);
 
   // ---- WebSocket connection with auto-reconnect ----
   const connectWs = useCallback(() => {
     if (closedRef.current) return;
-    const ws = new WebSocket(`${WS_BASE}/api/ws/${slug}`);
+    const token = editTokenStore.get(slug);
+    const ws = new WebSocket(`${WS_BASE}/api/ws/${slug}${token ? `?token=${encodeURIComponent(token)}` : ""}`);
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -127,16 +191,45 @@ export default function PastePage() {
       }
       switch (msg.type) {
         case "init":
-          setContent(msg.paste.content);
-          contentRef.current = msg.paste.content;
+          setCanEdit(!!msg.canEdit);
+          {
+            const c = msg.paste.content || "";
+            setContent(c);
+            contentRef.current = c;
+            // Seed the CRDT doc if empty; otherwise remote yupdates apply on top
+            const ytext = ydocRef.current.getText("content");
+            if (ytext.length === 0 && c && !msg.yUpdatesB64) {
+              ydocRef.current.transact(() => ytext.insert(0, c));
+            }
+          }
           setLanguage(msg.paste.language || "plaintext");
           setViews(msg.paste.views || 0);
           setExpiresAt(msg.paste.expiresAt);
           setViewers(msg.viewers || 1);
           break;
-        case "edit":
+        case "yupdate":
+          // Applied inside useCollab; a re-render pulse arrives via remotePulse
+          break;
+        case "restore":
           setContent(msg.content);
           contentRef.current = msg.content;
+          {
+            const ytext = ydocRef.current.getText("content");
+            ydocRef.current.transact(() => {
+              ytext.delete(0, ytext.length);
+              ytext.insert(0, msg.content);
+            }, "restore");
+          }
+          toast.info("Paste was restored to an earlier version");
+          break;
+        case "edit":
+          // Fallback full-text sync (only when CRDT is not in play)
+          setContent(msg.content);
+          contentRef.current = msg.content;
+          break;
+        case "files-changed":
+          // Another client added/removed an attachment — nothing to do;
+          // file cards re-resolve from their URLs automatically.
           break;
         case "language":
           setLanguage(msg.language || "plaintext");
@@ -153,6 +246,8 @@ export default function PastePage() {
             setStatus("expired");
           } else if (msg.code === "too_large") {
             toast.error(msg.message || "Content too large");
+          } else if (msg.code === "read_only") {
+            toast.error("This link is read-only — ask the owner for an edit link");
           }
           break;
         default:
@@ -223,7 +318,38 @@ export default function PastePage() {
     return () => clearInterval(iv);
   }, [expiresAt]);
 
-  // ---- send edits over WS ----
+  // ---- CRDT plumbing (active once the WS is up) ----
+  const { ytext, remotePulse } = useCollab({
+    wsRef,
+    slug,
+    canEdit,
+    enabled: status === "ready",
+    ydocRef,
+  });
+
+  // Mirror remote CRDT changes into React state (text blocks re-render)
+  const firstYRender = useRef(true);
+  useEffect(() => {
+    if (status !== "ready" || !ytext) return;
+    const txt = ytext.toString();
+    if (firstYRender.current) {
+      firstYRender.current = false;
+      if (txt === "" && contentRef.current) {
+        // Seed doc from loaded paste content (single client case)
+        ydocRef.current.transact(() => ytext.insert(0, contentRef.current));
+        return;
+      }
+    }
+    if (txt !== contentRef.current) {
+      applyingRemoteRef.current = true;
+      setContent(txt);
+      contentRef.current = txt;
+      applyingRemoteRef.current = false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remotePulse, status, ytext]);
+
+  // ---- send edits over WS (CRDT deltas; full-text as periodic backup) ----
   const sendEdit = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "edit", content: contentRef.current }));
@@ -231,16 +357,28 @@ export default function PastePage() {
   }, []);
 
   const applyContent = useCallback(
-    (newContent) => {
+    (newContent, { fromUser = true } = {}) => {
       setContent(newContent);
       contentRef.current = newContent;
+      // Route user typing through the Y.Doc so peers get deltas, not full text
+      if (fromUser && ytext && ytext.toString() !== newContent) {
+        const old = ytext.toString();
+        ydocRef.current.transact(() => {
+          ytext.delete(0, old.length);
+          ytext.insert(0, newContent);
+        });
+      }
       clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(sendEdit, DEBOUNCE_MS);
     },
-    [sendEdit],
+    [sendEdit, ytext, ydocRef],
   );
 
   const handleChange = (newContent) => {
+    if (!canEdit) {
+      toast.error("This link is read-only");
+      return;
+    }
     applyContent(newContent);
   };
 
@@ -364,13 +502,59 @@ export default function PastePage() {
   };
 
   const handleCopyLink = async () => {
-    const ok = await copyToClipboard(window.location.href);
+    const ok = await copyToClipboard(window.location.origin + `/${slug}`);
     if (ok) {
-      toast.success("Link copied to clipboard");
+      toast.success("View-only link copied");
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 1600);
     } else {
       toast.error("Could not copy link");
+    }
+  };
+
+  const handleCopyEditLink = async () => {
+    if (!editToken) return;
+    const ok = await copyToClipboard(`${window.location.origin + window.location.pathname}?edit=${editToken}`);
+    if (ok) {
+      toast.success("Edit link copied — anyone with it can edit this paste");
+      setCopiedEdit(true);
+      setTimeout(() => setCopiedEdit(false), 1600);
+    } else {
+      toast.error("Could not copy edit link");
+    }
+  };
+
+  // ---- revision history ----
+  const loadRevisions = useCallback(async () => {
+    setRevLoading(true);
+    try {
+      const res = await axios.get(`${API_BASE}/api/paste/${slug}/revisions`);
+      setRevisions(res.data.revisions || []);
+    } catch (err) {
+      setRevisions([]);
+      toast.error("Could not load history");
+    } finally {
+      setRevLoading(false);
+    }
+  }, [slug]);
+
+  useEffect(() => {
+    if (showHistory && revisions === null) loadRevisions();
+  }, [showHistory, revisions, loadRevisions]);
+
+  const handleRestoreRevision = async (rev) => {
+    try {
+      const res = await axios.get(`${API_BASE}/api/paste/${slug}/revisions/${rev}`);
+      const restored = res.data.content;
+      await axios.post(`${API_BASE}/api/paste/${slug}/restore`, {
+        editToken,
+        content: restored,
+      });
+      applyContent(restored, { fromUser: false });
+      toast.success(`Restored revision ${rev}`);
+      setShowHistory(false);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Restore failed");
     }
   };
 
@@ -455,8 +639,43 @@ export default function PastePage() {
           ? "Connecting"
           : "Offline";
 
+  const updateAvailable =
+    !!serverVersion &&
+    !!latestRelease &&
+    latestRelease !== serverVersion &&
+    !updateDismissed;
+
   return (
     <div className="h-screen flex flex-col bg-background">
+      {/* Update banner */}
+      {updateAvailable && (
+        <div
+          className="flex items-center justify-center gap-2 px-4 py-1.5 text-xs bg-primary/10 border-b border-primary/20 text-foreground"
+          data-testid="paste-update-banner"
+        >
+          <ArrowUpCircle className="h-3.5 w-3.5 text-primary shrink-0" />
+          <span>
+            LivePaste <span className="font-mono">v{latestRelease}</span> is available — you're running{" "}
+            <span className="font-mono">v{serverVersion}</span>.
+          </span>
+          <a
+            href={`https://github.com/NakshtraYadav/Live-Paste/releases/tag/v${latestRelease}`}
+            target="_blank"
+            rel="noreferrer"
+            className="underline text-primary font-medium"
+          >
+            What's new
+          </a>
+          <button
+            onClick={() => setUpdateDismissed(true)}
+            aria-label="Dismiss update banner"
+            className="ml-1 p-0.5 rounded hover:bg-secondary"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Toolbar */}
       <div className="sticky top-0 z-40 bg-background border-b border-border">
         <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2">
@@ -500,11 +719,35 @@ export default function PastePage() {
             <Button
               variant="outline"
               size="sm"
+              onClick={() => setShowHistory(true)}
+              data-testid="paste-toolbar-history-button"
+              className="shrink-0 active:scale-[0.98]"
+              aria-label="Revision history"
+            >
+              <History className="h-3.5 w-3.5 sm:mr-1.5" />
+              <span className="hidden sm:inline">History</span>
+            </Button>
+            {canEdit && editToken && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleCopyEditLink}
+                data-testid="paste-toolbar-copy-edit-link-button"
+                className="shrink-0 active:scale-[0.98]"
+                aria-label="Copy edit link"
+              >
+                {copiedEdit ? <Check className="h-3.5 w-3.5 sm:mr-1.5" /> : <KeyRound className="h-3.5 w-3.5 sm:mr-1.5" />}
+                <span className="hidden sm:inline">{copiedEdit ? "Copied" : "Edit link"}</span>
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => fileInputRef.current?.click()}
               data-testid="paste-toolbar-add-file-button"
               className="shrink-0 active:scale-[0.98]"
               aria-label="Add file"
-              disabled={uploadPct !== null}
+              disabled={uploadPct !== null || !canEdit}
             >
               <Paperclip className="h-3.5 w-3.5 sm:mr-1.5" />
               <span className="hidden sm:inline">Add file</span>
@@ -531,7 +774,7 @@ export default function PastePage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-            <Select value={language} onValueChange={handleLanguageChange}>
+            <Select value={language} onValueChange={handleLanguageChange} disabled={!canEdit}>
               <SelectTrigger
                 data-testid="paste-toolbar-language-select"
                 className="h-8 w-[130px] sm:w-[150px] text-xs"
@@ -596,21 +839,84 @@ export default function PastePage() {
       {/* Editor with inline images + line numbers + drop zone */}
       <div
         className="flex-1 overflow-auto bg-[hsl(var(--editor-bg))] relative"
-        onDragEnter={handleDragEnter}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        onPaste={handlePaste}
+        onDragEnter={canEdit ? handleDragEnter : undefined}
+        onDragOver={canEdit ? handleDragOver : undefined}
+        onDragLeave={canEdit ? handleDragLeave : undefined}
+        onDrop={canEdit ? handleDrop : undefined}
+        onPaste={canEdit ? handlePaste : undefined}
       >
+        {!canEdit && (
+          <div
+            className="absolute top-2 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground shadow-sm"
+            data-testid="paste-readonly-banner"
+          >
+            <EyeIcon className="h-3.5 w-3.5" /> Read-only — ask the owner for an edit link
+          </div>
+        )}
         <InlineBlocksEditor
           ref={editorApiRef}
           content={content}
           language={language}
+          readOnly={!canEdit}
           placeholder="Start typing — everyone with this link sees it live. Paste or drop files right here…"
           onChange={applyContent}
           onDeleteImage={handleDeleteFile}
           onCopyImageUrl={handleCopyFileUrl}
         />
+
+        {/* History side panel */}
+        {showHistory && (
+          <div
+            className="absolute inset-y-0 right-0 z-30 w-full max-w-sm border-l border-border bg-background/95 backdrop-blur flex flex-col shadow-xl"
+            data-testid="paste-history-panel"
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <History className="h-4 w-4 text-primary" /> Revision history
+              </div>
+              <div className="flex items-center gap-1">
+                <Button variant="ghost" size="sm" onClick={loadRevisions} disabled={revLoading} aria-label="Refresh history">
+                  {revLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setShowHistory(false)} aria-label="Close history">
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto p-3 space-y-2">
+              {(revisions || []).length === 0 && !revLoading && (
+                <p className="text-xs text-muted-foreground px-1 py-4 text-center">
+                  No snapshots yet — every edit creates one automatically.
+                </p>
+              )}
+              {(revisions || []).map((r) => (
+                <div
+                  key={r.rev}
+                  className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2"
+                  data-testid={`paste-history-row-${r.rev}`}
+                >
+                  <div className="min-w-0">
+                    <div className="text-xs font-mono">rev {r.rev}</div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {r.createdAt ? new Date(r.createdAt).toLocaleString() : ""} · {r.size} chars
+                    </div>
+                  </div>
+                  {canEdit && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleRestoreRevision(r.rev)}
+                      className="shrink-0 h-7 text-xs"
+                      data-testid={`paste-history-restore-${r.rev}`}
+                    >
+                      Restore
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {dragging && (
           <div

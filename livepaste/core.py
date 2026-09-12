@@ -4,21 +4,31 @@ Works in two modes (picked automatically by livepaste.storage.create_storage):
   - Hosted mode : MongoDB (MONGO_URL set)
   - Local mode  : SQLite + files on disk, and serves the bundled frontend
                   so `livepaste start` gives a complete app on one port.
+
+v2.0 additions:
+  - Edit tokens: creating a paste returns a secret `editToken`; writes (REST
+    and WebSocket) require it. Viewers without it get a read-only room.
+  - Revision history: every edit snapshot is stored (capped) and restorable.
+  - CRDT sync: Yjs update relay for conflict-free concurrent editing.
+  - /api/version for the web update banner; simple in-memory rate limiting.
 """
 
 import os
 import re
 import json
+import time
+import base64
 import random
 import string
+import hashlib
+import secrets
 import logging
 import asyncio
 import mimetypes
-import unicodedata
 from urllib.parse import quote
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Set
+from typing import Optional, Dict, Set, List
 
 from fastapi import (
     FastAPI,
@@ -28,12 +38,14 @@ from fastapi import (
     HTTPException,
     UploadFile,
     File,
+    Request,
 )
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from . import __version__
 from .storage import create_storage, FileTooLarge, now_utc
 
 logging.basicConfig(
@@ -70,6 +82,30 @@ def gen_slug(length: int = 7) -> str:
     return "".join(random.choices(alphabet, k=length))
 
 
+def new_edit_token() -> str:
+    return secrets.token_urlsafe(24)
+
+
+def is_expired(paste: dict) -> bool:
+    exp = paste.get("expiresAt")
+    if exp is None:
+        return False
+    if isinstance(exp, str):
+        exp = datetime.fromisoformat(exp)
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    return exp < now_utc()
+
+
+async def get_paste_doc(slug: str):
+    paste = await storage.find_paste(slug)
+    if paste and is_expired(paste):
+        await storage.delete_paste(slug)
+        await storage.purge_paste_files(slug)
+        return None
+    return paste
+
+
 def sanitize_filename(name: Optional[str]) -> str:
     """Accept ANY filename — executables, no extension, unicode, emoji.
 
@@ -95,24 +131,36 @@ def _content_disposition(content_type: str, filename: str) -> str:
     return f'{dtype}; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(filename)}'
 
 
-def is_expired(paste: dict) -> bool:
-    exp = paste.get("expiresAt")
-    if exp is None:
-        return False
-    if isinstance(exp, str):
-        exp = datetime.fromisoformat(exp)
-    if exp.tzinfo is None:
-        exp = exp.replace(tzinfo=timezone.utc)
-    return exp < now_utc()
+# ---------------- Rate limiting (simple in-memory, per IP) ----------------
+class RateLimiter:
+    """Fixed-window limiter. Generous defaults: protects against abuse, not users."""
+
+    def __init__(self):
+        self.events: Dict[str, List[float]] = {}
+
+    def allow(self, key: str, limit: int, window_s: int) -> bool:
+        now = time.monotonic()
+        bucket = [t for t in self.events.get(key, []) if now - t < window_s]
+        if len(bucket) >= limit:
+            self.events[key] = bucket
+            return False
+        bucket.append(now)
+        self.events[key] = bucket
+        # opportunistic cleanup
+        if len(self.events) > 4096:
+            cutoff = now - 3600
+            self.events = {k: v for k, v in self.events.items() if v and v[-1] > cutoff}
+        return True
 
 
-async def get_paste_doc(slug: str):
-    paste = await storage.find_paste(slug)
-    if paste and is_expired(paste):
-        await storage.delete_paste(slug)
-        await storage.purge_paste_files(slug)
-        return None
-    return paste
+limiter = RateLimiter()
+
+
+def client_ip(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
 
 
 # ---------------- Models ----------------
@@ -123,14 +171,46 @@ class PasteCreate(BaseModel):
     expiry: str = "never"  # 1h | 1d | 1w | never
 
 
+class RestoreBody(BaseModel):
+    editToken: str
+    content: str
+
+
+def _yupdates_b64(updates: List[bytes]) -> List[str]:
+    return [base64.b64encode(u).decode() for u in updates]
+
+
+def require_edit_token(paste: dict, provided: Optional[str]):
+    """Raise 403 unless `provided` matches the paste's edit token.
+
+    Legacy pastes created before edit tokens have none — they stay open
+    (anyone can edit) to preserve existing links' behavior.
+    """
+    token = paste.get("editToken")
+    if not token:
+        return
+    if not provided or not secrets.compare_digest(str(provided), str(token)):
+        raise HTTPException(status_code=403, detail="Edit token required (read-only link)")
+
+
 # ---------------- REST endpoints ----------------
 @api_router.get("/health")
 async def health():
     return {"status": "ok", "time": now_utc().isoformat()}
 
 
+@api_router.get("/version")
+async def version_info():
+    """Current server version — the web UI compares this with the latest
+    GitHub release to show the update banner."""
+    return {"version": __version__}
+
+
 @api_router.post("/paste")
-async def create_paste(body: PasteCreate):
+async def create_paste(body: PasteCreate, request: Request):
+    ip = client_ip(request)
+    if not limiter.allow(f"create:{ip}", limit=30, window_s=3600):
+        raise HTTPException(status_code=429, detail="Too many pastes created — try again later")
     if len(body.content) > MAX_CONTENT_SIZE:
         raise HTTPException(status_code=413, detail="Content too large (max 400KB)")
     if body.expiry not in EXPIRY_MAP:
@@ -161,6 +241,7 @@ async def create_paste(body: PasteCreate):
 
     delta = EXPIRY_MAP[body.expiry]
     expires_at = (now_utc() + delta) if delta else None
+    edit_token = new_edit_token()
 
     paste = {
         "slug": slug,
@@ -171,9 +252,13 @@ async def create_paste(body: PasteCreate):
         "updatedAt": now_utc().isoformat(),
         "expiresAt": expires_at.isoformat() if expires_at else None,
         "rev": 0,
+        "editToken": edit_token,
     }
     await storage.insert_paste(paste)
-    return paste
+
+    public = {k: v for k, v in paste.items() if k != "editToken"}
+    public["editToken"] = edit_token  # returned ONCE, at creation
+    return public
 
 
 @api_router.get("/paste/{slug}")
@@ -184,11 +269,77 @@ async def get_paste(slug: str, count_view: bool = False):
     if count_view:
         await storage.increment_views(slug)
         paste["views"] = paste.get("views", 0) + 1
-    return paste
+    public = {k: v for k, v in paste.items() if k != "editToken"}
+    return public
+
+
+@api_router.post("/paste/{slug}/verify")
+async def verify_edit_token(slug: str, body: dict):
+    """Check an edit token without side effects. Used by the web UI to
+    decide edit vs read-only mode."""
+    paste = await get_paste_doc(slug)
+    if not paste:
+        raise HTTPException(status_code=404, detail="Paste not found or expired")
+    token = paste.get("editToken")
+    if not token:
+        return {"canEdit": True, "legacy": True}
+    provided = body.get("editToken") or ""
+    return {"canEdit": bool(provided) and secrets.compare_digest(str(provided), str(token))}
+
+
+@api_router.post("/paste/{slug}/restore")
+async def restore_revision(slug: str, body: RestoreBody):
+    """Restore paste content to a previous snapshot (requires edit token)."""
+    paste = await get_paste_doc(slug)
+    if not paste:
+        raise HTTPException(status_code=404, detail="Paste not found or expired")
+    require_edit_token(paste, body.editToken)
+    if len(body.content) > MAX_CONTENT_SIZE:
+        raise HTTPException(status_code=413, detail="Content too large (max 400KB)")
+
+    updated_at = now_utc()
+    new_rev = await storage.append_revision(slug, body.content, updated_at)
+    await storage.update_content(slug, body.content, updated_at, new_rev)
+    # CRDT state is stale after a restore: clear it so clients re-sync
+    # from the restored plain text on their next edit.
+    await storage.clear_ystate(slug)
+    await manager.broadcast(
+        slug,
+        {
+            "type": "restore",
+            "content": body.content,
+            "rev": new_rev,
+        },
+    )
+    return {"ok": True, "rev": new_rev}
+
+
+# ---------------- Revisions ----------------
+@api_router.get("/paste/{slug}/revisions")
+async def list_revisions(slug: str):
+    paste = await get_paste_doc(slug)
+    if not paste:
+        raise HTTPException(status_code=404, detail="Paste not found or expired")
+    revs = await storage.list_revisions(slug)
+    return {"revisions": [{"rev": r["rev"], "createdAt": r["created_at"], "size": len(r["content"])} for r in revs]}
+
+
+@api_router.get("/paste/{slug}/revisions/{rev}")
+async def get_revision(slug: str, rev: int):
+    paste = await get_paste_doc(slug)
+    if not paste:
+        raise HTTPException(status_code=404, detail="Paste not found or expired")
+    r = await storage.get_revision(slug, rev)
+    if not r:
+        raise HTTPException(status_code=404, detail="Revision not found")
+    return {"rev": r["rev"], "content": r["content"], "createdAt": r["created_at"]}
 
 
 # ---------------- File endpoints (any file type) ----------------
-async def _upload_file(slug: str, file: UploadFile):
+async def _upload_file(slug: str, file: UploadFile, request: Request):
+    ip = client_ip(request)
+    if not limiter.allow(f"upload:{ip}", limit=60, window_s=3600):
+        raise HTTPException(status_code=429, detail="Too many uploads — try again later")
     paste = await get_paste_doc(slug)
     if not paste:
         raise HTTPException(status_code=404, detail="Paste not found or expired")
@@ -206,6 +357,7 @@ async def _upload_file(slug: str, file: UploadFile):
         logger.error(f"File upload failed for {slug}: {e}")
         raise HTTPException(status_code=500, detail="File upload failed, please try again")
 
+    await manager.broadcast(slug, {"type": "files-changed"})
     return {
         "id": file_id,
         "url": f"/api/file/{file_id}",
@@ -240,9 +392,9 @@ async def _delete_file(file_id: str):
 
 
 @api_router.post("/paste/{slug}/file")
-async def upload_file(slug: str, file: UploadFile = File(...)):
+async def upload_file(slug: str, file: UploadFile = File(...), request: Request = None):
     """Upload any file (max 100MB) attached to a paste."""
-    return await _upload_file(slug, file)
+    return await _upload_file(slug, file, request)
 
 
 @api_router.get("/file/{file_id}")
@@ -259,11 +411,11 @@ async def delete_file(file_id: str):
 # ---- Legacy image endpoints (kept for old clients / existing pastes) ----
 
 @api_router.post("/paste/{slug}/image")
-async def upload_image(slug: str, file: UploadFile = File(...)):
+async def upload_image(slug: str, file: UploadFile = File(...), request: Request = None):
     content_type = file.content_type or ""
     if not content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Only image files are allowed")
-    return await _upload_file(slug, file)
+    return await _upload_file(slug, file, request)
 
 
 @api_router.get("/image/{image_id}")
@@ -280,22 +432,30 @@ async def delete_image(image_id: str):
 class RoomManager:
     def __init__(self):
         self.rooms: Dict[str, Set[WebSocket]] = {}
+        self.editors: Dict[str, Set[WebSocket]] = {}
         self.lock = asyncio.Lock()
 
-    async def join(self, slug: str, ws: WebSocket):
+    async def join(self, slug: str, ws: WebSocket, can_edit: bool):
         async with self.lock:
             self.rooms.setdefault(slug, set()).add(ws)
-            return len(self.rooms[slug])
+            if can_edit:
+                self.editors.setdefault(slug, set()).add(ws)
+            return len(self.rooms[slug]), len(self.editors.get(slug, set()))
 
     async def leave(self, slug: str, ws: WebSocket):
         async with self.lock:
             conns = self.rooms.get(slug)
             if conns and ws in conns:
                 conns.remove(ws)
+            eds = self.editors.get(slug)
+            if eds and ws in eds:
+                eds.remove(ws)
             count = len(conns) if conns else 0
             if conns is not None and not conns:
-                del self.rooms[slug]
-            return count
+                self.rooms.pop(slug, None)
+            if eds is not None and not eds:
+                self.editors.pop(slug, None)
+            return count, len(self.editors.get(slug, set()))
 
     def viewer_count(self, slug: str) -> int:
         return len(self.rooms.get(slug, set()))
@@ -311,12 +471,27 @@ class RoomManager:
             except Exception:
                 pass
 
+    async def send_to_editors(self, slug: str, message: dict, exclude: Optional[WebSocket] = None):
+        eds = list(self.editors.get(slug, set()))
+        data = json.dumps(message)
+        for conn in eds:
+            if conn is exclude:
+                continue
+            try:
+                await conn.send_text(data)
+            except Exception:
+                pass
+
 
 manager = RoomManager()
+
+MAX_YUPDATE_SIZE = 512 * 1024  # single Yjs update cap
 
 
 @app.websocket("/api/ws/{slug}")
 async def ws_paste(websocket: WebSocket, slug: str):
+    token = websocket.query_params.get("token") or ""
+
     await websocket.accept()
 
     paste = await get_paste_doc(slug)
@@ -327,11 +502,21 @@ async def ws_paste(websocket: WebSocket, slug: str):
         await websocket.close(code=4404)
         return
 
-    await manager.join(slug, websocket)
+    stored = paste.get("editToken")
+    can_edit = (not stored) or bool(token) and secrets.compare_digest(token, str(stored))
 
-    await websocket.send_text(
-        json.dumps({"type": "init", "paste": paste, "viewers": manager.viewer_count(slug)})
-    )
+    await manager.join(slug, websocket, can_edit)
+
+    init_msg = {
+        "type": "init",
+        "paste": {k: v for k, v in paste.items() if k != "editToken"},
+        "viewers": manager.viewer_count(slug),
+        "canEdit": can_edit,
+    }
+    yupdates = await storage.get_yupdates(slug)
+    if yupdates:
+        init_msg["yUpdatesB64"] = _yupdates_b64(yupdates)
+    await websocket.send_text(json.dumps(init_msg))
     await manager.broadcast(
         slug, {"type": "presence", "viewers": manager.viewer_count(slug)}, exclude=websocket
     )
@@ -350,6 +535,35 @@ async def ws_paste(websocket: WebSocket, slug: str):
                 await websocket.send_text(json.dumps({"type": "pong"}))
                 continue
 
+            # ---- writes require edit rights ----
+            if mtype in ("edit", "yupdate", "language", "cursor") and not can_edit:
+                await websocket.send_text(
+                    json.dumps({"type": "error", "code": "read_only", "message": "This link is read-only"})
+                )
+                continue
+
+            if mtype == "yupdate":
+                # CRDT relay: store the update and fan it out. Each update is a
+                # valid standalone Yjs diff — clients apply them in order.
+                try:
+                    update = base64.b64decode(msg.get("updateB64") or "")
+                except Exception:
+                    continue
+                if not update or len(update) > MAX_YUPDATE_SIZE:
+                    continue
+                await storage.append_yupdate(slug, update)
+                await manager.broadcast(
+                    slug,
+                    {"type": "yupdate", "updateB64": base64.b64encode(update).decode()},
+                    exclude=websocket,
+                )
+                continue
+
+            if mtype == "cursor":
+                # Awareness relay (selection color/name) — not persisted
+                await manager.broadcast(slug, {"type": "cursor", "c": msg.get("c")}, exclude=websocket)
+                continue
+
             if mtype == "edit":
                 content = msg.get("content", "")
                 if len(content) > MAX_CONTENT_SIZE:
@@ -364,9 +578,12 @@ async def ws_paste(websocket: WebSocket, slug: str):
                     )
                     await websocket.close(code=4410)
                     break
-                new_rev = current.get("rev", 0) + 1
                 updated_at = now_utc()
+                new_rev = await storage.append_revision(slug, content, updated_at)
                 await storage.update_content(slug, content, updated_at, new_rev)
+                # Plain-text edits and CRDT state are two views of the same doc;
+                # a full-text edit invalidates pending CRDT diffs.
+                await storage.clear_ystate(slug)
                 await manager.broadcast(
                     slug,
                     {"type": "edit", "content": content, "rev": new_rev, "updatedAt": updated_at.isoformat()},
@@ -385,7 +602,7 @@ async def ws_paste(websocket: WebSocket, slug: str):
     except Exception as e:
         logger.warning(f"WS error on {slug}: {e}")
     finally:
-        count = await manager.leave(slug, websocket)
+        count, _ = await manager.leave(slug, websocket)
         await manager.broadcast(slug, {"type": "presence", "viewers": count})
 
 
@@ -402,8 +619,7 @@ app.add_middleware(
 
 # ---------------- Bundled frontend (local mode) ----------------
 if (STATIC_DIR / "index.html").exists() and os.environ.get("LIVEPASTE_SERVE_STATIC", "1") != "0":
-    if (STATIC_DIR / "static").exists():
-        app.mount("/static", StaticFiles(directory=STATIC_DIR / "static"), name="spa-static")
+    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="spa-assets")
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
@@ -457,7 +673,7 @@ async def on_shutdown():
         _cleanup_task.cancel()
     if storage:
         if _is_ephemeral():
-            # Peaceful exit: wipe this session's pastes and images
+            # Peaceful exit: wipe this session's pastes and files
             try:
                 await storage.purge_all()
             except Exception as e:

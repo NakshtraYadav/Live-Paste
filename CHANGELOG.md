@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.0] - 2026-09
+
+### Added
+- **True concurrent editing (CRDT)** — typing is now synced with [Yjs](https://github.com/yjs/yjs) over the existing WebSocket protocol (`yupdate` relay), so two people can type at the same time without clobbering each other. The server stores an ordered list of composable Yjs updates per paste (no merge library required) and replays them to new joiners; full-text edits remain as a periodic backup channel.
+- **Edit links vs. view links** — every new paste gets a secret **edit token** at creation (stored in the creator's `localStorage`, returned once). The plain link is now **read-only**; share `?edit=<token>` links to grant editing. Writes (REST restore, WS `edit`/`yupdate`/`language`) require the token; legacy pastes created before 2.0 stay open to preserve existing links. The creator sees an "Edit link" button in the toolbar; viewers see a read-only banner and can't upload, delete files, or change the language.
+- **Revision history** — every edit snapshots the paste (capped at 50 revisions). New endpoints `GET /api/paste/{slug}/revisions` and `GET /api/paste/{slug}/revisions/{rev}`, plus `POST /api/paste/{slug}/restore` (token-gated) with a live "restore" broadcast. The web UI gets a **History side panel** with one-click restore.
+- **Web update banner** — new `GET /api/version`; the UI compares it with the latest GitHub release and shows a dismissible "update available — what's new" banner with a link to the release notes.
+- **Hardened update system (CLI)** — `livepaste update` now verifies SHA256 checksums against the release's `SHA256SUMS` (published by CI), keeps the previous binary as `.old`, and adds `livepaste rollback`; `--check` dry-run, `-y` non-interactive mode, `--channel beta` for pre-releases, a daily background auto-update (`livepaste config auto-update on`), and a download progress bar.
+- **Offline test suite** — `tests/` with pytest + FastAPI TestClient on a temp SQLite dir (16 tests, ~0.5s, no network): edit tokens, read-only enforcement, revision restore, CRDT relay + replay state, any-file round-trips (`.exe`, `.vyb`, extensionless, unicode, empty), path-flattening, legacy image rule.
+- **Rate limiting** — fixed-window per-IP limits on paste creation (30/h) and uploads (60/h) to blunt abuse on hosted deployments.
+
+### Changed
+- **Frontend migrated from CRA/react-scripts to Vite** — production build is ~10× faster (~1s vs ~9s); dev server proxies `/api` to `livepaste start`. Build env var renamed `REACT_APP_BACKEND_URL` → `VITE_BACKEND_URL`.
+- The WebSocket `init` message now includes `canEdit` and (when present) the paste's accumulated CRDT updates.
+- CI release workflow publishes `SHA256SUMS` alongside the binaries.
+
+### Compatibility
+- Old links keep working: pastes without an edit token remain editable by anyone; the plain `/api/image/*` endpoints and single-URL sharing behave as before.
+
+---
+
 ## [1.6.0] - 2026-09
 
 ### Added

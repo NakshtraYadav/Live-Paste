@@ -2,7 +2,7 @@
 
 > **Share text and files. Edit together. Instantly.**
 
-LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Create a paste, share the link, and everyone with the link can view and edit the content live — no accounts, no sign-up, no install.
+LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Create a paste, share the link, and everyone with the link can view it live — no accounts, no sign-up, no install. Hand out **edit links** to let people type along: edits sync conflict-free (CRDT) so simultaneous typing just works.
 
 **Version:** see [`VERSION`](./VERSION) · **Changes:** see [`CHANGELOG.md`](./CHANGELOG.md)
 
@@ -11,7 +11,9 @@ LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Cre
 ## Features
 
 - **Instant live links** — random short slugs by default, or pick a custom slug (e.g. `/my-notes`)
-- **Real-time collaboration** — edits broadcast to all connected clients in under a second via WebSockets
+- **Edit vs. view links** — the link you share is read-only; a secret edit token (stored in your browser) controls who can change the paste. Share the edit link with people you trust.
+- **True concurrent editing (CRDT)** — Yjs-powered sync over WebSockets: multiple people can type at once with no lost keystrokes
+- **Revision history** — every edit is snapshotted (last 50); browse and restore from the History side panel
 - **Syntax highlighting** — Prism-powered highlighting for Python, JavaScript, TypeScript, and many more languages
 - **Inline images (Google Docs style)** — paste, drop, or upload screenshots and they render right at your cursor position in the document (up to 100 MB each), with hover controls to open, copy URL, or delete
 - **Share any file — literally any** — PDFs, zips, videos, audio, spreadsheets, `.exe` binaries, ROMs, files with no extension, unicode/emoji names — every file type is accepted (up to 100 MB) and appears as a clean file card inline in the paste, with an extension badge plus open, download, copy URL, and delete controls
@@ -20,6 +22,7 @@ LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Cre
 - **Editor niceties** — line numbers, status bar (lines / chars / size), copy content & copy link buttons
 - **Dark mode** — toggle persisted across sessions
 - **Anonymous by design** — no login, no tracking, just a link
+- **Self-updating with integrity** — `livepaste update` verifies SHA256 checksums, keeps the old binary for `livepaste rollback`, supports `--channel beta`, optional daily auto-update, and a dry-run `--check`. The web UI shows an update banner when a new release is out.
 
 ## Install on Your Machine (macOS / Linux)
 
@@ -133,6 +136,11 @@ All backend routes are prefixed with `/api`.
 | `GET`    | `/api/health`              | Health check                                                                |
 | `POST`   | `/api/paste`               | Create a paste. Body: `content`, `language`, optional `customSlug`, `expiry` (`1h` \| `1d` \| `1w` \| `never`) |
 | `GET`    | `/api/paste/{slug}`        | Fetch a paste; `?count_view=true` increments the view counter               |
+| `GET`    | `/api/version`             | Server version (drives the web update banner)                              |
+| `POST`   | `/api/paste/{slug}/verify` | Check an edit token → `{canEdit}`                                          |
+| `GET`    | `/api/paste/{slug}/revisions`      | List edit snapshots (rev, time, size)                      |
+| `GET`    | `/api/paste/{slug}/revisions/{rev}`| Fetch one snapshot's content                               |
+| `POST`   | `/api/paste/{slug}/restore`        | Restore content to a snapshot (body: `editToken`, `content`)|
 | `POST`   | `/api/paste/{slug}/file`   | Upload **any** file (multipart) attached to a paste                         |
 | `GET`    | `/api/file/{file_id}`      | Stream an uploaded file of any type                                         |
 | `DELETE` | `/api/file/{file_id}`      | Delete an uploaded file                                                     |
@@ -144,7 +152,7 @@ All backend routes are prefixed with `/api`.
 
 | Endpoint         | Description                                                              |
 | ---------------- | ------------------------------------------------------------------------ |
-| `/api/ws/{slug}` | Join a paste room. Receives edit broadcasts, presence (viewer count), and revision updates. Unknown slugs receive `{type: "error", code: "not_found"}`. |
+| `/api/ws/{slug}` | Join a paste room (`?token=<editToken>` to edit). Receives edit/CRDT broadcasts, presence, revision restores. Unknown slugs receive `{type: "error", code: "not_found"}`; write attempts from read-only connections receive `code: "read_only"`. |
 
 ### Limits & Rules
 
@@ -152,6 +160,36 @@ All backend routes are prefixed with `/api`.
 - Max file size: **100 MB** per uploaded file — **no file type is ever rejected**; unknown extensions, executables, and extensionless files all work. Filenames are sanitized of path components/control chars only.
 - Reserved slugs (`api`, `ws`, `static`, `new`, `about`, …) cannot be claimed
 - Custom slugs are validated; duplicates are rejected
+- Rate limits (per IP): 30 paste creations/hour, 60 uploads/hour
+- Revisions: last **50** snapshots per paste
+
+### Update system (CLI)
+
+```bash
+livepaste update --check        # dry run — is a new version out?
+livepaste update                # download, verify SHA256, swap binary (.old kept)
+livepaste rollback              # restore the previous binary
+livepaste update --channel beta # track a pre-release branch/tag
+livepaste config auto-update on # check + auto-apply daily in the background
+```
+
+Every GitHub Release ships a `SHA256SUMS` file (generated by CI); updates refuse to install on checksum mismatch. The web UI shows an "update available" banner by comparing `/api/version` with the latest GitHub release.
+
+### Development
+
+```bash
+# backend
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e . pytest httpx
+pytest tests/ -q                # offline suite, <1s
+livepaste start                 # or: uvicorn livepaste.core:app --port 8090
+
+# frontend (Vite)
+cd frontend && yarn install
+yarn dev                        # :3000, proxies /api to :8090
+VITE_BACKEND_URL="" yarn build  # production bundle in build/
+rm -rf livepaste/static && cp -r frontend/build livepaste/static
+```
 
 ## Getting Started (Development)
 

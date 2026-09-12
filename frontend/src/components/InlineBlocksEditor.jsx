@@ -104,7 +104,7 @@ const lineCountOf = (block) => {
 };
 
 const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
-  { content, language, placeholder, onChange, onDeleteImage, onCopyImageUrl },
+  { content, language, placeholder, onChange, onDeleteImage, onCopyImageUrl, readOnly },
   ref,
 ) {
   const blocks = useMemo(() => parseBlocks(content), [content]);
@@ -327,8 +327,7 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
                 alt={block.name}
                 loading="lazy"
                 draggable={false}
-              />
-              <div className="lp-image-actions opacity-0 group-hover:opacity-100">
+              />                  <div className={`lp-image-actions opacity-0 group-hover:opacity-100 ${readOnly ? "hidden" : ""}`}>
                 <button
                   type="button"
                   aria-label={`Open ${block.name}`}
@@ -383,7 +382,7 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
                 </div>
                 <span className="lp-file-url truncate">{block.url}</span>
               </div>
-              <div className="lp-image-actions lp-file-actions">
+              <div className={`lp-image-actions lp-file-actions ${readOnly ? "hidden" : ""}`}>
                 <button
                   type="button"
                   aria-label={`Open ${block.name}`}
@@ -499,10 +498,11 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
             >
               <Editor
                 value={block.value}
-                onValueChange={handleBlockChange(index)}
+                onValueChange={readOnly ? undefined : handleBlockChange(index)}
                 highlight={(code) => highlightCode(code, language)}
                 padding={0}
                 textareaClassName="code-input"
+                readOnly={readOnly || undefined}
                 placeholder={
                   isSingleEmptyDoc
                     ? placeholder

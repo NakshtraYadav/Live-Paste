@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 logger = logging.getLogger("livepaste.storage")
 
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB (any file type)
+MAX_REVISIONS_PER_PASTE = 50  # snapshot cap; oldest pruned
 
 
 def now_utc():
@@ -63,6 +64,8 @@ class MongoStorage:
     async def startup(self):
         await self.db.pastes.create_index("slug", unique=True)
         await self.db.pastes.create_index("expiresAt", expireAfterSeconds=0)
+        await self.db.revisions.create_index("slug", unique=True)
+        await self.db.ystate.create_index("slug", unique=True)
 
     async def shutdown(self):
         self.client.close()
@@ -81,6 +84,7 @@ class MongoStorage:
             "updatedAt": _iso(doc.get("updatedAt")),
             "expiresAt": _iso(doc.get("expiresAt")),
             "rev": doc.get("rev", 0),
+            "editToken": doc.get("editToken"),
         }
 
     async def slug_exists(self, slug: str) -> bool:
@@ -95,6 +99,8 @@ class MongoStorage:
 
     async def delete_paste(self, slug: str):
         await self.db.pastes.delete_one({"slug": slug})
+        await self.db.revisions.delete_one({"slug": slug})
+        await self.db.ystate.delete_one({"slug": slug})
 
     async def increment_views(self, slug: str):
         await self.db.pastes.update_one({"slug": slug}, {"$inc": {"views": 1}})
@@ -191,8 +197,54 @@ class MongoStorage:
             logger.warning(f"Image purge failed for {slug}: {e}")
 
     async def purge_expired(self):
-        # Mongo TTL index handles paste expiry; purge orphaned images lazily.
+        # Mongo TTL index handles paste expiry; purge orphaned files lazily.
         return
+
+    # ---- revisions (Mongo: capped child docs) ----
+    async def append_revision(self, slug: str, content: str, updated_at) -> int:
+        current = await self.db.pastes.find_one({"slug": slug}, {"rev": 1})
+        rev = (current.get("rev", 0) if current else 0) + 1
+        await self.db.revisions.update_one(
+            {"slug": slug},
+            {
+                "$push": {
+                    "snapshots": {
+                        "$each": [{"rev": rev, "content": content, "created_at": _iso(updated_at)}],
+                        "$slice": -MAX_REVISIONS_PER_PASTE,
+                    }
+                }
+            },
+            upsert=True,
+        )
+        return rev
+
+    async def list_revisions(self, slug: str):
+        doc = await self.db.revisions.find_one({"slug": slug})
+        return (doc or {}).get("snapshots", [])
+
+    async def get_revision(self, slug: str, rev: int):
+        doc = await self.db.revisions.find_one(
+            {"slug": slug, "snapshots.rev": rev}, {"snapshots.$": 1}
+        )
+        snaps = (doc or {}).get("snapshots", [])
+        return snaps[0] if snaps else None
+
+    # ---- CRDT (Yjs) state: ordered list of composable updates ----
+    MAX_YUPDATES_STORED = 1000
+
+    async def get_yupdates(self, slug: str):
+        doc = await self.db.ystate.find_one({"slug": slug})
+        return (doc or {}).get("updates", [])
+
+    async def append_yupdate(self, slug: str, update: bytes):
+        await self.db.ystate.update_one(
+            {"slug": slug},
+            {"$push": {"updates": {"$each": [update], "$slice": -self.MAX_YUPDATES_STORED}}},
+            upsert=True,
+        )
+
+    async def clear_ystate(self, slug: str):
+        await self.db.ystate.delete_one({"slug": slug})
 
     async def purge_all(self):
         # Never wipe hosted data — ephemeral mode is a local (SQLite) feature.
@@ -227,7 +279,8 @@ class SQLiteStorage:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 expires_at TEXT,
-                rev INTEGER NOT NULL DEFAULT 0
+                rev INTEGER NOT NULL DEFAULT 0,
+                edit_token TEXT
             )"""
         )
         await self._conn.execute(
@@ -239,6 +292,31 @@ class SQLiteStorage:
                 size INTEGER NOT NULL,
                 uploaded_at TEXT NOT NULL
             )"""
+        )
+        await self._conn.execute(
+            """CREATE TABLE IF NOT EXISTS revisions (
+                slug TEXT NOT NULL,
+                rev INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (slug, rev)
+            )"""
+        )
+        await self._conn.execute(
+            """CREATE TABLE IF NOT EXISTS ystate (
+                slug TEXT NOT NULL,
+                idx INTEGER NOT NULL,
+                "update" BLOB NOT NULL,
+                PRIMARY KEY (slug, idx)
+            )"""
+        )
+        # Migrations for databases created before v2.0
+        cur = await self._conn.execute("PRAGMA table_info(pastes)")
+        cols = {row[1] for row in await cur.fetchall()}
+        if "edit_token" not in cols:
+            await self._conn.execute("ALTER TABLE pastes ADD COLUMN edit_token TEXT")
+        await self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_revisions_slug ON revisions(slug, rev DESC)"
         )
         await self._conn.commit()
 
@@ -262,6 +340,7 @@ class SQLiteStorage:
             "updatedAt": row["updated_at"],
             "expiresAt": row["expires_at"],
             "rev": row["rev"],
+            "editToken": row["edit_token"],
         }
 
     async def slug_exists(self, slug: str) -> bool:
@@ -272,8 +351,8 @@ class SQLiteStorage:
     async def insert_paste(self, paste: dict):
         async with self._lock:
             await self._conn.execute(
-                """INSERT INTO pastes (slug, content, language, views, created_at, updated_at, expires_at, rev)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO pastes (slug, content, language, views, created_at, updated_at, expires_at, rev, edit_token)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     paste["slug"],
                     paste["content"],
@@ -283,6 +362,7 @@ class SQLiteStorage:
                     _iso(paste["updatedAt"]),
                     _iso(paste["expiresAt"]),
                     paste.get("rev", 0),
+                    paste.get("editToken"),
                 ),
             )
             await self._conn.commit()
@@ -290,6 +370,8 @@ class SQLiteStorage:
     async def delete_paste(self, slug: str):
         async with self._lock:
             await self._conn.execute("DELETE FROM pastes WHERE slug = ?", (slug,))
+            await self._conn.execute("DELETE FROM revisions WHERE slug = ?", (slug,))
+            await self._conn.execute("DELETE FROM ystate WHERE slug = ?", (slug,))
             await self._conn.commit()
 
     async def increment_views(self, slug: str):
@@ -387,6 +469,81 @@ class SQLiteStorage:
             await self._conn.commit()
         for row in rows:
             (self.images_dir / row["id"]).unlink(missing_ok=True)
+
+    # ---- revisions (snapshot history, capped per paste) ----
+    async def append_revision(self, slug: str, content: str, updated_at) -> int:
+        async with self._lock:
+            cur = await self._conn.execute("SELECT rev FROM pastes WHERE slug = ?", (slug,))
+            row = await cur.fetchone()
+            rev = (row["rev"] if row else 0) + 1
+            await self._conn.execute(
+                "INSERT OR REPLACE INTO revisions (slug, rev, content, created_at) VALUES (?, ?, ?, ?)",
+                (slug, rev, content, _iso(updated_at)),
+            )
+            # Prune: keep only the newest MAX_REVISIONS_PER_PASTE snapshots
+            await self._conn.execute(
+                """DELETE FROM revisions WHERE slug = ? AND rev NOT IN (
+                    SELECT rev FROM revisions WHERE slug = ? ORDER BY rev DESC LIMIT ?
+                )""",
+                (slug, slug, MAX_REVISIONS_PER_PASTE),
+            )
+            await self._conn.commit()
+        return rev
+
+    async def list_revisions(self, slug: str):
+        async with self._lock:
+            cur = await self._conn.execute(
+                "SELECT rev, content, created_at FROM revisions WHERE slug = ? ORDER BY rev DESC",
+                (slug,),
+            )
+            return [dict(r) for r in await cur.fetchall()]
+
+    async def get_revision(self, slug: str, rev: int):
+        async with self._lock:
+            cur = await self._conn.execute(
+                "SELECT rev, content, created_at FROM revisions WHERE slug = ? AND rev = ?",
+                (slug, rev),
+            )
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
+    # ---- CRDT (Yjs) state: ordered list of composable updates ----
+    # Each stored blob is ONE valid Yjs update. Clients apply them in order —
+    # Yjs updates are commutative, so ordered replay converges without needing
+    # a server-side merge library.
+    MAX_YUPDATES_STORED = 1000
+
+    async def get_yupdates(self, slug: str):
+        async with self._lock:
+            cur = await self._conn.execute(
+                'SELECT "update" FROM ystate WHERE slug = ? ORDER BY idx ASC', (slug,)
+            )
+            return [r["update"] for r in await cur.fetchall()]
+
+    async def append_yupdate(self, slug: str, update: bytes):
+        async with self._lock:
+            cur = await self._conn.execute(
+                "SELECT COALESCE(MAX(idx), -1) + 1 FROM ystate WHERE slug = ?", (slug,)
+            )
+            idx = (await cur.fetchone())[0]
+            if idx >= self.MAX_YUPDATES_STORED:
+                # Compact: drop the oldest half (clients recover via full sync)
+                await self._conn.execute(
+                    "DELETE FROM ystate WHERE slug = ? AND idx < ?", (slug, idx // 2)
+                )
+                cur = await self._conn.execute(
+                    "SELECT COALESCE(MAX(idx), -1) + 1 FROM ystate WHERE slug = ?", (slug,)
+                )
+                idx = (await cur.fetchone())[0]
+            await self._conn.execute(
+                'INSERT INTO ystate (slug, idx, "update") VALUES (?, ?, ?)', (slug, idx, update)
+            )
+            await self._conn.commit()
+
+    async def clear_ystate(self, slug: str):
+        async with self._lock:
+            await self._conn.execute("DELETE FROM ystate WHERE slug = ?", (slug,))
+            await self._conn.commit()
 
     async def purge_expired(self):
         """Delete expired pastes and their images (SQLite has no TTL index)."""

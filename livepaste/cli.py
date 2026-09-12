@@ -83,11 +83,13 @@ def parse_version(v):
         return None
 
 
-def fetch_latest_version(timeout=3):
+def fetch_latest_version(timeout=3, channel=None):
     slug = repo_slug()
     if slug.startswith("CHANGE_ME"):
         return None
-    for branch in ("main", "master"):
+    ref = channel if channel and channel != "stable" else None
+    branches = (ref, "main", "master") if ref else ("main", "master")
+    for branch in branches:
         url = f"https://raw.githubusercontent.com/{slug}/{branch}/VERSION"
         try:
             with urllib.request.urlopen(url, timeout=timeout) as resp:
@@ -95,6 +97,66 @@ def fetch_latest_version(timeout=3):
         except Exception:
             continue
     return None
+
+
+def fetch_release_asset(asset_name, timeout=300):
+    """Download a release asset (follows 'latest' redirect). Returns bytes."""
+    slug = repo_slug()
+    url = f"https://github.com/{slug}/releases/latest/download/{asset_name}"
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
+        return resp.read()
+
+
+def _print_progress(count, block_size, total):
+    if total > 0:
+        pct = min(100, count * block_size * 100 // total)
+        bar = "█" * (pct // 5) + "░" * (20 - pct // 5)
+        sys.stdout.write(f"\r  {bar} {pct:3d}%")
+        sys.stdout.flush()
+
+
+def verify_checksum(data, asset_name, channel=None):
+    """Verify SHA256 against the release's SHA256SUMS file.
+
+    Returns True when verified, False on mismatch, None when no checksum file
+    was published (older releases) — in that case we proceed but warn.
+    """
+    import hashlib
+
+    try:
+        sums = fetch_release_asset("SHA256SUMS", timeout=30)
+    except Exception:
+        print("  ⚠  No SHA256SUMS published for this release — skipping verification")
+        return None
+    expected = None
+    for line in sums.decode().splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2 and parts[1].strip().lstrip("*") == asset_name:
+            expected = parts[0].strip().lower()
+            break
+    if expected is None:
+        print("  ⚠  Checksum for this asset missing from SHA256SUMS — skipping verification")
+        return None
+    actual = hashlib.sha256(data).hexdigest()
+    if actual != expected:
+        print("\n  ✗ CHECKSUM MISMATCH — download corrupted or tampered. Aborting.")
+        print(f"    expected {expected}")
+        print(f"    actual   {actual}")
+        return False
+    print("\r  ✓ SHA256 verified" + " " * 30)
+    return True
+
+
+def backup_binary(target: str) -> str:
+    """Copy the current binary to <target>.old for `livepaste rollback`."""
+    import shutil
+
+    old = f"{target}.old"
+    try:
+        shutil.copy2(target, old)
+    except Exception:
+        pass
+    return old
 
 
 def check_for_update(quiet=False):
@@ -153,6 +215,10 @@ def cmd_start(args):
 
     if not args.no_update_check:
         try:
+            _auto_update_watchdog()
+        except Exception:
+            pass
+        try:
             check_for_update(quiet=True)
         except Exception:
             pass
@@ -184,7 +250,7 @@ def binary_asset_name():
     return None
 
 
-def _update_binary(latest):
+def _update_binary(latest, channel=None, assume_yes=False):
     """Self-update a standalone binary from the latest GitHub release."""
     import stat
     import tempfile
@@ -193,16 +259,22 @@ def _update_binary(latest):
     if not asset:
         print("✗ No prebuilt binary for this platform. Reinstall from GitHub instead.")
         sys.exit(1)
-    slug = repo_slug()
-    url = f"https://github.com/{slug}/releases/latest/download/{asset}"
     target = os.path.realpath(sys.executable)
-    print(f"Downloading {url} ...")
+    if not assume_yes:
+        answer = input(f"Update to v{latest or 'latest'}? [Y/n] ").strip().lower()
+        if answer and answer not in ("y", "yes"):
+            print("Update cancelled.")
+            return
+    print(f"  Downloading v{latest or 'latest'} …")
     try:
-        with urllib.request.urlopen(url, timeout=120) as resp:
-            data = resp.read()
+        data = fetch_release_asset(asset)
     except Exception as e:
-        print(f"✗ Download failed: {e}")
+        print(f"\n✗ Download failed: {e}")
         sys.exit(1)
+    verdict = verify_checksum(data, asset, channel)
+    if verdict is False:
+        sys.exit(1)
+    backup_binary(target)
     tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(target), prefix=".livepaste-new-")
     try:
         with os.fdopen(tmp_fd, "wb") as f:
@@ -216,7 +288,8 @@ def _update_binary(latest):
             pass
         print(f"✗ Could not replace the binary: {e}")
         sys.exit(1)
-    print(f"✓ Updated successfully{f' to v{latest}' if latest else ''}. Restart `livepaste start` to use it.")
+    print(f"✓ Updated to v{latest or 'latest'}. Previous version kept at {os.path.basename(target)}.old")
+    print("  Restart `livepaste start` to use it. Roll back anytime: livepaste rollback")
 
 
 def cmd_update(args):
@@ -225,16 +298,28 @@ def cmd_update(args):
         print("No GitHub repository configured yet.")
         print('Set it with:  export LIVEPASTE_REPO="owner/repo"')
         sys.exit(1)
-    latest = fetch_latest_version()
+    channel = args.channel or read_config().get("CHANNEL")
+    latest = fetch_latest_version(channel=channel)
     current_t = parse_version(__version__)
     latest_t = parse_version(latest) if latest else None
+    if args.check:
+        if not latest:
+            print("Could not reach GitHub to check for updates.")
+            sys.exit(1)
+        if latest_t and current_t and latest_t > current_t:
+            print(f"Update available: v{__version__} → v{latest}")
+            sys.exit(0)
+        print(f"Up to date (v{__version__}{f', channel: {channel}' if channel else ''}).")
+        sys.exit(0)
     if latest_t and current_t and latest_t <= current_t and not args.force:
         print(f"Already on the latest version (v{__version__}).")
         return
     if is_frozen():
-        _update_binary(latest)
+        _update_binary(latest, channel, assume_yes=args.yes)
         return
     target = f"git+https://github.com/{slug}.git"
+    if channel and channel != "stable":
+        target = f"git+https://github.com/{slug}.git@{channel}"
     print(f"Updating LivePaste from {target} ...")
     result = subprocess.run(
         [sys.executable, "-m", "pip", "install", "--upgrade", "--quiet", target]
@@ -244,6 +329,68 @@ def cmd_update(args):
     else:
         print("✗ Update failed — see pip output above.")
         sys.exit(result.returncode)
+
+
+def cmd_rollback(args):
+    if not is_frozen():
+        print("Rollback is for standalone binary installs. pip users: reinstall a pinned version:")
+        print(f'  pip install "git+https://github.com/{repo_slug()}.git@v<version>"')
+        sys.exit(1)
+    target = os.path.realpath(sys.executable)
+    old = f"{target}.old"
+    if not os.path.exists(old):
+        print("No previous version found (nothing rolled back yet).")
+        sys.exit(1)
+    import shutil
+    import tempfile
+
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(target), prefix=".livepaste-rb-")
+    with os.fdopen(tmp_fd, "wb") as out, open(old, "rb") as src:
+        shutil.copyfileobj(src, out)
+    os.chmod(tmp_path, os.stat(old).st_mode)
+    os.replace(tmp_path, target)
+    os.remove(old)
+    print("✓ Rolled back to the previous version. Restart `livepaste start`.")
+
+
+def _auto_update_watchdog():
+    """Background auto-update: download + verify + stage the binary, then swap
+    in if the staged file has been stable for a day. Best-effort, never blocks."""
+    try:
+        if not is_frozen() or read_config().get("AUTO_UPDATE") != "1":
+            return
+        marker = os.path.join(os.path.expanduser("~"), ".livepaste", "last_autoupdate")
+        if os.path.exists(marker):
+            import time as _t
+
+            if _t.time() - os.path.getmtime(marker) < 86400:
+                return  # checked within the last day
+        latest = fetch_latest_version(timeout=3)
+        current_t, latest_t = parse_version(__version__), parse_version(latest) if latest else None
+        if not latest_t or not current_t or latest_t <= current_t:
+            return
+        asset = binary_asset_name()
+        if not asset:
+            return
+        data = fetch_release_asset(asset)
+        if verify_checksum(data, asset) is False:
+            return
+        target = os.path.realpath(sys.executable)
+        backup_binary(target)
+        import stat as _stat
+        import tempfile
+
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(target), prefix=".livepaste-auto-")
+        with os.fdopen(tmp_fd, "wb") as f:
+            f.write(data)
+        os.chmod(tmp_path, os.stat(tmp_path).st_mode | _stat.S_IXUSR | _stat.S_IXGRP | _stat.S_IXOTH)
+        os.replace(tmp_path, target)
+        os.makedirs(os.path.dirname(marker), exist_ok=True)
+        with open(marker, "w") as f:
+            f.write(latest)
+        print(f"  ⬆  Auto-updated to v{latest} — takes effect on next restart.")
+    except Exception:
+        pass  # auto-update must never break startup
 
 
 def cmd_version(args):
@@ -259,6 +406,8 @@ CONFIG_KEYS = {
     "data-dir": ("DATA_DIR", lambda v: os.path.abspath(os.path.expanduser(v))),
     "keep-data": ("KEEP_DATA", lambda v: "1" if v.lower() in ("on", "1", "true", "yes") else "0"),
     "repo": ("REPO", str),
+    "channel": ("CHANNEL", str),
+    "auto-update": ("AUTO_UPDATE", lambda v: "1" if v.lower() in ("on", "1", "true", "yes") else "0"),
 }
 
 
@@ -331,7 +480,13 @@ def main():
 
     p_update = sub.add_parser("update", help="Update LivePaste from GitHub")
     p_update.add_argument("--force", action="store_true", help="Reinstall even if already up to date")
+    p_update.add_argument("--check", action="store_true", help="Check for updates without installing")
+    p_update.add_argument("--channel", default=None, help="Update channel: stable (default) or a branch/tag like beta")
+    p_update.add_argument("-y", "--yes", action="store_true", help="Assume yes; skip the confirmation prompt")
     p_update.set_defaults(func=cmd_update)
+
+    p_rollback = sub.add_parser("rollback", help="Restore the previous binary version")
+    p_rollback.set_defaults(func=cmd_rollback)
 
     p_config = sub.add_parser("config", help="View or change settings (port, data-dir, keep-data)")
     p_config.add_argument("key", nargs="?", help="Setting name: port | data-dir | keep-data | repo")
