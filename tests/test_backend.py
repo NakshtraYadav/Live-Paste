@@ -199,3 +199,116 @@ def test_legacy_image_endpoint_still_image_only(client):
         files={"file": ("notes.txt", b"hello", "text/plain")},
     )
     assert r.status_code == 400
+
+
+# ---------------- sheets (multiple pages) ----------------
+
+def test_sheets_default_and_create(client):
+    p = _create(client, content="page one")
+    slug, token = p["slug"], p["editToken"]
+
+    sheets = client.get(f"/api/paste/{slug}/sheets").json()["sheets"]
+    assert sheets == [{"sheetId": "main", "name": "Page 1", "position": 0}]
+
+    res = client.post(
+        f"/api/paste/{slug}/sheets",
+        json={"editToken": token, "name": "Notes", "content": "sheet body"},
+    )
+    assert res.status_code == 200
+    sid = res.json()["sheetId"]
+    assert res.json()["name"] == "Notes"
+
+    # main is now listed alongside real sheets, and the new sheet got "Page 2"
+    listed = client.get(f"/api/paste/{slug}/sheets").json()["sheets"]
+    assert [s["sheetId"] for s in listed] == ["main", sid]
+    assert listed[0]["name"] == "Page 1"
+    assert listed[1]["name"] == "Notes"
+
+    body = client.get(f"/api/paste/{slug}/sheets/{sid}").json()
+    assert body["content"] == "sheet body"
+    assert body["language"] == "plaintext"
+
+    # main sheet maps to the paste content
+    main = client.get(f"/api/paste/{slug}/sheets/main").json()
+    assert main["content"] == "page one"
+
+    # create with a wrong token → 403
+    assert (
+        client.post(
+            f"/api/paste/{slug}/sheets", json={"editToken": "wrong", "name": "nope"}
+        ).status_code
+        == 403
+    )
+
+
+def test_sheet_rename_language_delete(client):
+    p = _create(client, content="x")
+    slug, token = p["slug"], p["editToken"]
+    sid = client.post(
+        f"/api/paste/{slug}/sheets", json={"editToken": token, "name": "Draft"}
+    ).json()["sheetId"]
+
+    res = client.patch(
+        f"/api/paste/{slug}/sheets/{sid}",
+        json={"editToken": token, "name": "Draft 2", "language": "python"},
+    )
+    assert res.json()["name"] == "Draft 2"
+    assert res.json()["language"] == "python"
+
+    assert (
+        client.delete(f"/api/paste/{slug}/sheets/{sid}?editToken={token}").status_code == 200
+    )
+    assert client.get(f"/api/paste/{slug}/sheets/{sid}").status_code == 404
+
+    # main sheet can't be deleted
+    assert (
+        client.delete(f"/api/paste/{slug}/sheets/main?editToken={token}").status_code == 400
+    )
+
+
+def test_sheet_ws_relay_and_state(client):
+    p = _create(client, content="")
+    slug, token = p["slug"], p["editToken"]
+    sid = client.post(
+        f"/api/paste/{slug}/sheets", json={"editToken": token, "name": "P2"}
+    ).json()["sheetId"]
+    upd = base64.b64encode(b"sheet-y-update").decode()
+
+    with client.websocket_connect(f"/api/ws/{slug}?token={token}") as a, \
+         client.websocket_connect(f"/api/ws/{slug}?token={token}") as b:
+        a.receive_json()
+        b.receive_json()
+        a.send_json({"type": "s:yupdate", "sheetId": sid, "updateB64": upd})
+        got = b.receive_json()
+        while got["type"] != "s:yupdate":
+            got = b.receive_json()
+        assert got["sheetId"] == sid and got["updateB64"] == upd
+
+    # a fresh joiner opens the sheet and receives the stored state
+    with client.websocket_connect(f"/api/ws/{slug}?token={token}") as c:
+        c.receive_json()  # init
+        c.send_json({"type": "s:open", "sheetId": sid})
+        state = c.receive_json()
+        while state["type"] != "s:state":
+            state = c.receive_json()
+        assert state["sheetId"] == sid
+        assert upd in state["yUpdatesB64"]
+
+
+def test_sheet_full_text_edit_persists(client):
+    p = _create(client, content="x")
+    slug, token = p["slug"], p["editToken"]
+    sid = client.post(
+        f"/api/paste/{slug}/sheets", json={"editToken": token}
+    ).json()["sheetId"]
+
+    with client.websocket_connect(f"/api/ws/{slug}?token={token}") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "s:edit", "sheetId": sid, "content": "edited sheet"})
+        import time
+
+        time.sleep(0.1)
+
+    assert client.get(f"/api/paste/{slug}/sheets/{sid}").json()["content"] == "edited sheet"
+    # main content untouched
+    assert client.get(f"/api/paste/{slug}").json()["content"] == "x"

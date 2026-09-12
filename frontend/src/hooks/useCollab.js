@@ -6,16 +6,29 @@ import { WS_BASE } from "@/lib/constants";
  * Bridges a Yjs doc over LivePaste's existing WebSocket protocol.
  *
  * Wire format (server side, see livepaste/core.py):
- *   → { type: "yupdate", updateB64 }   CRDT update relay (editors only)
- *   ← { type: "yupdate", updateB64 }   fan-out to the whole room
- *   ← { type: "init", yStateB64 }      server's merged state on join
+ *   → { type: "yupdate", updateB64 }        CRDT update relay (editors only)
+ *   ← { type: "yupdate", updateB64 }        fan-out to the whole room
+ *   ← { type: "init", yUpdatesB64: [...] }  server's stored update list on join
+ *   ← { type: "s:state", yUpdatesB64 }      per-sheet update list (handled in PastePage)
  *
  * Local typing applies Y.Text deltas to `ytext`; remote updates land in the
- * same ytext. `editorBinding` (see InlineBlocksEditor) maps the Y.Text to
- * per-block textareas so the block UI stays identical.
+ * same ytext. The editor binding maps the Y.Text to per-block textareas so the
+ * block UI stays identical.
+ *
+ * `docVersion` bumps whenever the underlying Y.Doc instance is swapped
+ * (paste change / sheet switch) so the memoized ytext follows it.
+ *
+ * `sheetRef` holds the active sheet id: edits on the implicit "main" sheet are
+ * relayed as plain `yupdate` messages, edits on any other sheet as sheet-scoped
+ * `s:yupdate` messages — and incoming plain `yupdate`s are only applied while
+ * "main" is the active sheet, so multi-sheet docs never cross-contaminate.
  */
-export default function useCollab({ wsRef, slug, canEdit, enabled, ydocRef }) {
-  const ytext = useMemo(() => (ydocRef.current ? ydocRef.current.getText("content") : null), [ydocRef]);
+export default function useCollab({ wsRef, slug, canEdit, enabled, ydocRef, docVersion = 0, sheetRef }) {
+  const ytext = useMemo(
+    () => (ydocRef.current ? ydocRef.current.getText("content") : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ydocRef, docVersion],
+  );
   const pendingRef = useRef([]);
   const [remotePulse, setRemotePulse] = useState(0);
 
@@ -32,11 +45,13 @@ export default function useCollab({ wsRef, slug, canEdit, enabled, ydocRef }) {
     const flush = () => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const sid = sheetRef ? sheetRef.current : "main";
+      const msg = sid === "main" ? { type: "yupdate" } : { type: "s:yupdate", sheetId: sid };
       const list = pendingRef.current;
       pendingRef.current = [];
       for (const u of list) {
         try {
-          ws.send(JSON.stringify({ type: "yupdate", updateB64: encode(u) }));
+          ws.send(JSON.stringify({ ...msg, updateB64: encode(u) }));
         } catch (e) {
           /* ignore */
         }
@@ -44,7 +59,7 @@ export default function useCollab({ wsRef, slug, canEdit, enabled, ydocRef }) {
     };
 
     const onUpdate = (update, origin) => {
-      // origin === null → local transaction; relay it
+      // origin === null → local transaction; relay it so peers merge our delta
       if (origin !== null) return;
       pendingRef.current.push(update);
       flush();
@@ -57,7 +72,7 @@ export default function useCollab({ wsRef, slug, canEdit, enabled, ydocRef }) {
       clearInterval(iv);
       doc.off("update", onUpdate);
     };
-  }, [enabled, wsRef, ydocRef]);
+  }, [enabled, wsRef, ydocRef, docVersion]);
 
   // Handle server messages: initial state + relays
   useEffect(() => {
@@ -83,12 +98,23 @@ export default function useCollab({ wsRef, slug, canEdit, enabled, ydocRef }) {
       } catch (e) {
         return;
       }
-      if (msg.type === "init" && msg.yStateB64) {
-        applyB64(msg.yStateB64);
-        setRemotePulse((n) => n + 1);
+      if (msg.type === "init" && Array.isArray(msg.yUpdatesB64) && msg.yUpdatesB64.length) {
+        let applied = 0;
+        for (const b64 of msg.yUpdatesB64) if (applyB64(b64)) applied += 1;
+        if (applied) setRemotePulse((n) => n + 1);
+      } else if (msg.type === "init" && msg.yStateB64) {
+        // Backward compat with an older single-state payload
+        if (applyB64(msg.yStateB64)) setRemotePulse((n) => n + 1);
       } else if (msg.type === "yupdate" && msg.updateB64) {
-        if (applyB64(msg.updateB64)) setRemotePulse((n) => n + 1);
-      } else if (msg.type === "restore" && msg.content != null) {
+        // Plain relays belong to the main sheet only
+        if ((!sheetRef || sheetRef.current === "main") && applyB64(msg.updateB64)) {
+          setRemotePulse((n) => n + 1);
+        }
+      } else if (
+        msg.type === "restore" &&
+        msg.content != null &&
+        (!sheetRef || sheetRef.current === "main")
+      ) {
         // A revision restore replaced the canonical text
         doc.transact(() => {
           ytext.delete(0, ytext.length);
@@ -101,21 +127,7 @@ export default function useCollab({ wsRef, slug, canEdit, enabled, ydocRef }) {
     if (!ws) return undefined;
     ws.addEventListener("message", onMessage);
     return () => ws.removeEventListener("message", onMessage);
-  }, [enabled, wsRef, ydocRef, slug]);
+  }, [enabled, wsRef, ydocRef, docVersion, ytext]);
 
-  const relayPending = () => {
-    const doc = ydocRef.current;
-    const ws = wsRef.current;
-    if (!doc || !ws || ws.readyState !== WebSocket.OPEN) return;
-    const sv = Y.encodeStateVector(doc);
-    let s = "";
-    for (const b of sv) s += String.fromCharCode(b);
-    try {
-      ws.send(JSON.stringify({ type: "yupdate", updateB64: btoa(s) }));
-    } catch (e) {
-      /* ignore */
-    }
-  };
-
-  return { ytext, relayPending, remotePulse };
+  return { ytext, remotePulse };
 }

@@ -112,10 +112,16 @@ export default function PastePage() {
   const [copiedEdit, setCopiedEdit] = useState(false);
   const [uploadPct, setUploadPct] = useState(null); // null = not uploading
   const [dragging, setDragging] = useState(false);
+  const [sheets, setSheets] = useState([{ sheetId: "main", name: "Page 1", position: 0 }]);
+  const [activeSheet, setActiveSheet] = useState("main");
+  const [sheetContents, setSheetContents] = useState({ main: "" }); // sheetId → text for non-active rendering
+  const [renamingSheet, setRenamingSheet] = useState(null); // sheetId being renamed
+  const [renameValue, setRenameValue] = useState("");
   const [canEdit, setCanEdit] = useState(false);
   const [editToken, setEditToken] = useState("");
   const [showHistory, setShowHistory] = useState(false);
   const [revisions, setRevisions] = useState(null); // null = not loaded
+  const [docVersion, setDocVersion] = useState(0); // bump when the Y.Doc instance is swapped
   const [revLoading, setRevLoading] = useState(false);
   const [serverVersion, setServerVersion] = useState(null);
   const [latestRelease, setLatestRelease] = useState(null);
@@ -133,12 +139,16 @@ export default function PastePage() {
   const dragDepthRef = useRef(0);
   const ydocRef = useRef(new Y.Doc());
   const applyingRemoteRef = useRef(false);
+  const activeSheetRef = useRef("main");
+  const sheetYdocsRef = useRef(new Map()); // sheetId → Y.Doc for background sheets
+  const pendingUpdatesRef = useRef(new Map()); // sheetId → Uint8Array[] of missed updates
 
   useEffect(() => {
     document.title = `/${slug} — LivePaste`;
     setEditToken(consumeEditTokenFromUrl(slug));
     // Fresh Y.Doc per paste
     ydocRef.current = new Y.Doc();
+    setDocVersion((v) => v + 1);
     return () => {
       ydocRef.current.destroy();
       ydocRef.current = new Y.Doc();
@@ -176,6 +186,7 @@ export default function PastePage() {
     const token = editTokenStore.get(slug);
     const ws = new WebSocket(`${WS_BASE}/api/ws/${slug}${token ? `?token=${encodeURIComponent(token)}` : ""}`);
     wsRef.current = ws;
+    activeSheetRef.current = activeSheet;
 
     ws.onopen = () => {
       retriesRef.current = 0;
@@ -202,30 +213,113 @@ export default function PastePage() {
               ydocRef.current.transact(() => ytext.insert(0, c));
             }
           }
+          if (Array.isArray(msg.sheets) && msg.sheets.length) {
+            setSheets(msg.sheets);
+          }
           setLanguage(msg.paste.language || "plaintext");
           setViews(msg.paste.views || 0);
           setExpiresAt(msg.paste.expiresAt);
           setViewers(msg.viewers || 1);
+          setStatus("ready");
           break;
         case "yupdate":
           // Applied inside useCollab; a re-render pulse arrives via remotePulse
           break;
+        case "s:state": {
+          // CRDT history for a sheet we just opened
+          if (msg.sheetId !== activeSheetRef.current) break;
+          const list = msg.yUpdatesB64 || [];
+          if (list.length) {
+            for (const b64 of list) {
+              try {
+                const bin = atob(b64);
+                const bytes = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+                Y.applyUpdate(ydocRef.current, bytes, `s:${msg.sheetId}`);
+              } catch (e) {
+                /* ignore bad update */
+              }
+            }
+            // Sync React state from the merged doc right away
+            const merged = ydocRef.current.getText("content").toString();
+            applyingRemoteRef.current = true;
+            setContent(merged);
+            contentRef.current = merged;
+            applyingRemoteRef.current = false;
+          } else {
+            // No stored CRDT state — this is a fresh sheet: seed from REST content
+            const ytext = ydocRef.current.getText("content");
+            if (ytext.length === 0 && contentRef.current) {
+              ydocRef.current.transact(() => ytext.insert(0, contentRef.current));
+            }
+          }
+          break;
+        }
+        case "s:yupdate": {
+          if (msg.sheetId === activeSheetRef.current) {
+            const ytext = ydocRef.current.getText("content");
+            try {
+              const bin = atob(msg.updateB64);
+              const bytes = new Uint8Array(bin.length);
+              for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+              Y.applyUpdate(ydocRef.current, bytes, "remote");
+            } catch (e) {
+              /* ignore */
+            }
+          } else {
+            // background sheet: cache the update until it's opened
+            try {
+              const bin = atob(msg.updateB64);
+              const bytes = new Uint8Array(bin.length);
+              for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+              const doc = sheetYdocsRef.current.get(msg.sheetId);
+              if (doc) Y.applyUpdate(doc, bytes, "remote");
+              pendingUpdatesRef.current.set(
+                msg.sheetId,
+                [...(pendingUpdatesRef.current.get(msg.sheetId) || []), bytes],
+              );
+            } catch (e) {
+              /* ignore */
+            }
+          }
+          break;
+        }
+        case "s:edit":
+          if (msg.sheetId === activeSheetRef.current) {
+            setContent(msg.content);
+            contentRef.current = msg.content;
+          } else {
+            setSheetContents((m) => ({ ...m, [msg.sheetId]: msg.content }));
+          }
+          break;
+        case "s:language":
+          if (msg.sheetId === activeSheetRef.current) setLanguage(msg.language || "plaintext");
+          break;
+        case "sheets-changed":
+          refreshSheets();
+          if (msg.action === "deleted" && msg.sheetId === activeSheetRef.current) {
+            switchSheet("main");
+            toast.info("This page was deleted by another editor");
+          }
+          break;
         case "restore":
-          setContent(msg.content);
-          contentRef.current = msg.content;
-          {
+          if (activeSheetRef.current === "main") {
+            setContent(msg.content);
+            contentRef.current = msg.content;
             const ytext = ydocRef.current.getText("content");
             ydocRef.current.transact(() => {
               ytext.delete(0, ytext.length);
               ytext.insert(0, msg.content);
             }, "restore");
+            toast.info("Paste was restored to an earlier version");
           }
-          toast.info("Paste was restored to an earlier version");
           break;
         case "edit":
           // Fallback full-text sync (only when CRDT is not in play)
-          setContent(msg.content);
-          contentRef.current = msg.content;
+          if (activeSheetRef.current === "main") {
+            setContent(msg.content);
+            contentRef.current = msg.content;
+          }
           break;
         case "files-changed":
           // Another client added/removed an attachment — nothing to do;
@@ -277,7 +371,9 @@ export default function PastePage() {
   }, [slug]);
 
   useEffect(() => {
-    if (status !== "ready") return undefined;
+    // Connect as soon as the page mounts — the WS `init` message itself tells us
+    // whether the paste exists (error paths below flip status to notfound/expired).
+    if (status === "notfound" || status === "expired") return undefined;
     closedRef.current = false;
     retriesRef.current = 0;
     connectWs();
@@ -323,14 +419,16 @@ export default function PastePage() {
     wsRef,
     slug,
     canEdit,
-    enabled: status === "ready",
+    enabled: status !== "notfound" && status !== "expired",
     ydocRef,
+    docVersion,
+    sheetRef: activeSheetRef,
   });
 
   // Mirror remote CRDT changes into React state (text blocks re-render)
   const firstYRender = useRef(true);
   useEffect(() => {
-    if (status !== "ready" || !ytext) return;
+    if (status === "notfound" || status === "expired" || !ytext) return;
     const txt = ytext.toString();
     if (firstYRender.current) {
       firstYRender.current = false;
@@ -350,28 +448,177 @@ export default function PastePage() {
   }, [remotePulse, status, ytext]);
 
   // ---- send edits over WS (CRDT deltas; full-text as periodic backup) ----
+  // The backup full-text channel is sheet-scoped: `edit` only ever refers to the
+  // main sheet, other sheets go through `s:edit` so main is never clobbered.
   const sendEdit = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "edit", content: contentRef.current }));
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (activeSheetRef.current === "main") {
+      ws.send(JSON.stringify({ type: "edit", content: contentRef.current }));
+    } else {
+      ws.send(
+        JSON.stringify({ type: "s:edit", sheetId: activeSheetRef.current, content: contentRef.current }),
+      );
     }
   }, []);
+
+  // Replace the whole Y.Text with newContent using minimal (prefix/suffix) edits
+  // so concurrent editors' changes merge instead of clobbering each other.
+  const replaceYText = useCallback(
+    (ydoc, text, newContent) => {
+      const old = text.toString();
+      if (old === newContent) return;
+      let start = 0;
+      const minLen = Math.min(old.length, newContent.length);
+      while (start < minLen && old.charCodeAt(start) === newContent.charCodeAt(start)) start += 1;
+      let endOld = old.length;
+      let endNew = newContent.length;
+      while (endOld > start && endNew > start && old.charCodeAt(endOld - 1) === newContent.charCodeAt(endNew - 1)) {
+        endOld -= 1;
+        endNew -= 1;
+      }
+      ydoc.transact(() => {
+        if (endOld > start) text.delete(start, endOld - start);
+        if (endNew > start) text.insert(start, newContent.slice(start, endNew));
+      });
+    },
+    [],
+  );
 
   const applyContent = useCallback(
     (newContent, { fromUser = true } = {}) => {
       setContent(newContent);
       contentRef.current = newContent;
-      // Route user typing through the Y.Doc so peers get deltas, not full text
-      if (fromUser && ytext && ytext.toString() !== newContent) {
-        const old = ytext.toString();
-        ydocRef.current.transact(() => {
-          ytext.delete(0, old.length);
-          ytext.insert(0, newContent);
-        });
+      // Route user typing through the Y.Doc as minimal deltas so peers merge cleanly
+      if (fromUser && ytext) {
+        replaceYText(ydocRef.current, ytext, newContent);
       }
       clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(sendEdit, DEBOUNCE_MS);
     },
-    [sendEdit, ytext, ydocRef],
+    [sendEdit, ytext, ydocRef, replaceYText],
+  );
+
+  // ---- sheets (pages) ----
+  const refreshSheets = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/api/paste/${slug}/sheets`);
+      if (Array.isArray(res.data.sheets)) setSheets(res.data.sheets);
+    } catch (e) {
+      /* ignore */
+    }
+  }, [slug]);
+
+  const switchSheet = useCallback(
+    async (sheetId) => {
+      if (sheetId === activeSheetRef.current) return;
+      // Flush any pending edit for the outgoing sheet BEFORE switching context,
+      // otherwise the debounce fires later and writes the old text to the new sheet.
+      clearTimeout(debounceRef.current);
+      const wsNow = wsRef.current;
+      if (wsNow?.readyState === WebSocket.OPEN) {
+        const prev = activeSheetRef.current;
+        const payload =
+          prev === "main"
+            ? { type: "edit", content: contentRef.current }
+            : { type: "s:edit", sheetId: prev, content: contentRef.current };
+        wsNow.send(JSON.stringify(payload));
+      }
+      // Save current sheet's Y.Doc aside (stays in memory for background sync)
+      sheetYdocsRef.current.set(activeSheetRef.current, ydocRef.current);
+      activeSheetRef.current = sheetId;
+      setActiveSheet(sheetId);
+
+      // Reuse cached doc or spin up a fresh one
+      const cached = sheetYdocsRef.current.get(sheetId);
+      const nextDoc = cached || new Y.Doc();
+      sheetYdocsRef.current.set(sheetId, nextDoc);
+      ydocRef.current = nextDoc;
+      firstYRender.current = true;
+      setDocVersion((v) => v + 1); // ytext memo follows the swapped doc
+
+      try {
+        const res = await axios.get(`${API_BASE}/api/paste/${slug}/sheets/${sheetId}`);
+        setLanguage(res.data.language || "plaintext");
+        const c = res.data.content || "";
+        setContent(c);
+        contentRef.current = c;
+        // NOTE: the Y.Doc is NOT seeded here — the `s:state` response below is
+        // authoritative. If it carries no CRDT history we seed from this text then.
+      } catch (e) {
+        toast.error("Could not open that page");
+        return;
+      }
+      // Ask the server for this sheet's CRDT history
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "s:open", sheetId }));
+        // replay updates that arrived while the sheet was in the background
+        const pending = pendingUpdatesRef.current.get(sheetId) || [];
+        for (const bytes of pending) {
+          try {
+            Y.applyUpdate(nextDoc, bytes, "remote");
+          } catch (err) {
+            /* ignore */
+          }
+        }
+        pendingUpdatesRef.current.set(sheetId, []);
+      }
+    },
+    [slug],
+  );
+
+  const createSheet = useCallback(async () => {
+    if (!canEdit) {
+      toast.error("This link is read-only");
+      return;
+    }
+    try {
+      const res = await axios.post(`${API_BASE}/api/paste/${slug}/sheets`, {
+        editToken: editTokenStore.get(slug),
+        content: "",
+      });
+      await refreshSheets();
+      await switchSheet(res.data.sheetId);
+      toast.success(`"${res.data.name}" created`);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not create page");
+    }
+  }, [canEdit, slug, refreshSheets, switchSheet]);
+
+  const renameSheet = useCallback(
+    async (sheetId, name) => {
+      try {
+        await axios.patch(`${API_BASE}/api/paste/${slug}/sheets/${sheetId}`, {
+          editToken: editTokenStore.get(slug),
+          name,
+        });
+        await refreshSheets();
+      } catch (err) {
+        toast.error(err?.response?.data?.detail || "Rename failed");
+      }
+    },
+    [slug, refreshSheets],
+  );
+
+  const deleteSheet = useCallback(
+    async (sheetId) => {
+      if (!canEdit) {
+        toast.error("This link is read-only");
+        return;
+      }
+      try {
+        await axios.delete(
+          `${API_BASE}/api/paste/${slug}/sheets/${sheetId}?editToken=${encodeURIComponent(editTokenStore.get(slug))}`,
+        );
+        await refreshSheets();
+        if (activeSheetRef.current === sheetId) switchSheet("main");
+        toast.success("Page deleted");
+      } catch (err) {
+        toast.error(err?.response?.data?.detail || "Delete failed");
+      }
+    },
+    [canEdit, slug, refreshSheets, switchSheet],
   );
 
   const handleChange = (newContent) => {
@@ -385,7 +632,10 @@ export default function PastePage() {
   const handleLanguageChange = (lang) => {
     setLanguage(lang);
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "language", language: lang }));
+      const type = activeSheetRef.current === "main" ? "language" : "s:language";
+      wsRef.current.send(
+        JSON.stringify({ type, language: lang, sheetId: activeSheetRef.current }),
+      );
     }
   };
 
@@ -723,8 +973,7 @@ export default function PastePage() {
               data-testid="paste-toolbar-history-button"
               className="shrink-0 active:scale-[0.98]"
               aria-label="Revision history"
-            >
-              <History className="h-3.5 w-3.5 sm:mr-1.5" />
+            >              <History className="h-3.5 w-3.5 sm:mr-1.5" />
               <span className="hidden sm:inline">History</span>
             </Button>
             {canEdit && editToken && (
@@ -834,6 +1083,79 @@ export default function PastePage() {
             <ThemeToggle testId="paste-toolbar-theme-toggle" />
           </div>
         </div>
+      </div>
+
+      {/* Sheet tabs */}
+      <div
+        className="flex items-center gap-1 px-3 sm:px-4 py-1 border-b border-border bg-background overflow-x-auto"
+        data-testid="paste-sheets-bar"
+      >
+        {sheets.map((s) => {
+          const active = s.sheetId === activeSheet;
+          const isRenaming = renamingSheet === s.sheetId;
+          return (
+            <div
+              key={s.sheetId}
+              className={`group flex items-center rounded-t-md border border-b-0 px-2.5 py-1 text-xs cursor-pointer select-none shrink-0 ${
+                active
+                  ? "border-border bg-[hsl(var(--editor-bg))] text-foreground font-medium"
+                  : "border-transparent text-muted-foreground hover:bg-secondary"
+              }`}
+              data-testid={`paste-sheet-tab-${s.sheetId}`}
+              onClick={() => !isRenaming && switchSheet(s.sheetId)}
+              onDoubleClick={() => {
+                if (!canEdit || s.sheetId === "main") return;
+                setRenamingSheet(s.sheetId);
+                setRenameValue(s.name);
+              }}
+            >
+              {isRenaming ? (
+                <input
+                  autoFocus
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onBlur={() => {
+                    setRenamingSheet(null);
+                    if (renameValue.trim() && renameValue !== s.name) renameSheet(s.sheetId, renameValue.trim());
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.target.blur();
+                    if (e.key === "Escape") setRenamingSheet(null);
+                  }}
+                  className="bg-transparent outline-none w-24 font-mono"
+                  data-testid={`paste-sheet-rename-input`}
+                />
+              ) : (
+                <>
+                  <span className="max-w-[160px] truncate">{s.name}</span>
+                  {canEdit && s.sheetId !== "main" && (
+                    <button
+                      className="ml-1.5 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
+                      aria-label={`Delete ${s.name}`}
+                      data-testid={`paste-sheet-delete-${s.sheetId}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteSheet(s.sheetId);
+                      }}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })}
+        {canEdit && (
+          <button
+            onClick={createSheet}
+            className="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-secondary rounded-md"
+            aria-label="Add page"
+            data-testid="paste-sheet-add-button"
+          >
+            <span className="text-base leading-none">+</span> Page
+          </button>
+        )}
       </div>
 
       {/* Editor with inline images + line numbers + drop zone */}

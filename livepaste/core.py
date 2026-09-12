@@ -62,6 +62,8 @@ _cleanup_task = None
 
 # ---------------- Constants ----------------
 MAX_CONTENT_SIZE = 400_000  # ~400KB max paste size
+MAX_SHEETS_PER_PASTE = 32
+MAX_SHEET_NAME_LEN = 60
 RESERVED_SLUGS = {
     "api", "ws", "static", "assets", "favicon.ico", "robots.txt",
     "index.html", "manifest.json", "new", "about",
@@ -176,8 +178,26 @@ class RestoreBody(BaseModel):
     content: str
 
 
+class SheetCreateBody(BaseModel):
+    editToken: str
+    name: str = ""
+    content: str = ""
+    language: str = "plaintext"
+
+
+class SheetUpdateBody(BaseModel):
+    editToken: str
+    name: Optional[str] = None
+    language: Optional[str] = None
+
+
 def _yupdates_b64(updates: List[bytes]) -> List[str]:
     return [base64.b64encode(u).decode() for u in updates]
+
+
+def _clean_sheet_name(name: Optional[str], fallback: str) -> str:
+    name = (name or "").strip()
+    return (name[:MAX_SHEET_NAME_LEN] or fallback)
 
 
 def require_edit_token(paste: dict, provided: Optional[str]):
@@ -312,6 +332,112 @@ async def restore_revision(slug: str, body: RestoreBody):
         },
     )
     return {"ok": True, "rev": new_rev}
+
+
+# ---------------- Sheets (multiple pages per paste) ----------------
+def _sheets_with_main(sheets):
+    """Every paste implicitly has sheet "main" (its original document).
+    Make sure it is always present in listings, sorted first."""
+    rest = sorted(
+        (s for s in sheets if s["sheetId"] != "main"),
+        key=lambda s: s.get("position", 0),
+    )
+    return [{"sheetId": "main", "name": "Page 1", "position": 0}] + rest
+
+
+@api_router.get("/paste/{slug}/sheets")
+async def list_sheets(slug: str):
+    paste = await get_paste_doc(slug)
+    if not paste:
+        raise HTTPException(status_code=404, detail="Paste not found or expired")
+    sheets = await storage.list_sheets(slug)
+    return {"sheets": _sheets_with_main(sheets)}
+
+
+@api_router.get("/paste/{slug}/sheets/{sheet_id}")
+async def get_sheet(slug: str, sheet_id: str):
+    paste = await get_paste_doc(slug)
+    if not paste:
+        raise HTTPException(status_code=404, detail="Paste not found or expired")
+    if sheet_id == "main":
+        return {"sheetId": "main", "name": "Page 1", "content": paste["content"], "language": paste["language"], "position": 0}
+    sheet = await storage.get_sheet(slug, sheet_id)
+    if not sheet:
+        raise HTTPException(status_code=404, detail="Sheet not found")
+    return sheet
+
+
+@api_router.post("/paste/{slug}/sheets")
+async def create_sheet(slug: str, body: SheetCreateBody):
+    paste = await get_paste_doc(slug)
+    if not paste:
+        raise HTTPException(status_code=404, detail="Paste not found or expired")
+    require_edit_token(paste, body.editToken)
+    if len(body.content) > MAX_CONTENT_SIZE:
+        raise HTTPException(status_code=413, detail="Content too large (max 400KB)")
+    if await storage.count_sheets(slug) >= MAX_SHEETS_PER_PASTE:
+        raise HTTPException(status_code=400, detail=f"Too many sheets (max {MAX_SHEETS_PER_PASTE})")
+
+    sheet_id = secrets.token_hex(6)
+    existing = await storage.list_sheets(slug)
+    # "main" occupies position 0 as "Page 1", so stored sheets start at 1 → "Page 2"
+    n = len(existing) + 1
+    name = _clean_sheet_name(body.name, f"Page {n + 1}")
+    existing_names = {s["name"].lower() for s in existing}
+    existing_names.add("page 1")
+    if name.lower() in existing_names:
+        name = f"{name} {n + 1}"
+
+    await storage.insert_sheet(
+        slug, sheet_id, name, body.content, body.language or "plaintext", n, now_utc()
+    )
+    await manager.broadcast(
+        slug,
+        {"type": "sheets-changed", "action": "created", "sheetId": sheet_id, "name": name},
+    )
+    return {"sheetId": sheet_id, "name": name, "position": n}
+
+
+@api_router.patch("/paste/{slug}/sheets/{sheet_id}")
+async def update_sheet(slug: str, sheet_id: str, body: SheetUpdateBody):
+    paste = await get_paste_doc(slug)
+    if not paste:
+        raise HTTPException(status_code=404, detail="Paste not found or expired")
+    require_edit_token(paste, body.editToken)
+    if sheet_id == "main":
+        raise HTTPException(status_code=400, detail="The first page cannot be renamed here")
+    if not await storage.get_sheet(slug, sheet_id):
+        raise HTTPException(status_code=404, detail="Sheet not found")
+
+    if body.name is not None:
+        await storage.rename_sheet(slug, sheet_id, _clean_sheet_name(body.name, "Page"))
+    if body.language is not None:
+        await storage.update_sheet_language(slug, sheet_id, body.language)
+    await manager.broadcast(
+        slug,
+        {"type": "sheets-changed", "action": "updated", "sheetId": sheet_id},
+    )
+    sheet = await storage.get_sheet(slug, sheet_id)
+    return {"sheetId": sheet_id, "name": sheet["name"], "language": sheet["language"]}
+
+
+@api_router.delete("/paste/{slug}/sheets/{sheet_id}")
+async def delete_sheet(slug: str, sheet_id: str, editToken: str = ""):
+    paste = await get_paste_doc(slug)
+    if not paste:
+        raise HTTPException(status_code=404, detail="Paste not found or expired")
+    require_edit_token(paste, editToken)
+    if sheet_id == "main":
+        raise HTTPException(status_code=400, detail="The first page cannot be deleted")
+    if not await storage.get_sheet(slug, sheet_id):
+        raise HTTPException(status_code=404, detail="Sheet not found")
+
+    await storage.delete_sheet(slug, sheet_id)
+    await manager.broadcast(
+        slug,
+        {"type": "sheets-changed", "action": "deleted", "sheetId": sheet_id},
+    )
+    return {"ok": True}
 
 
 # ---------------- Revisions ----------------
@@ -516,6 +642,11 @@ async def ws_paste(websocket: WebSocket, slug: str):
     yupdates = await storage.get_yupdates(slug)
     if yupdates:
         init_msg["yUpdatesB64"] = _yupdates_b64(yupdates)
+    try:
+        sheets = await storage.list_sheets(slug)
+    except Exception:
+        sheets = []
+    init_msg["sheets"] = _sheets_with_main(sheets)
     await websocket.send_text(json.dumps(init_msg))
     await manager.broadcast(
         slug, {"type": "presence", "viewers": manager.viewer_count(slug)}, exclude=websocket
@@ -536,9 +667,97 @@ async def ws_paste(websocket: WebSocket, slug: str):
                 continue
 
             # ---- writes require edit rights ----
-            if mtype in ("edit", "yupdate", "language", "cursor") and not can_edit:
+            if (
+                mtype in ("edit", "yupdate", "language", "cursor")
+                or (mtype or "").startswith("s:")
+            ) and not can_edit:
                 await websocket.send_text(
                     json.dumps({"type": "error", "code": "read_only", "message": "This link is read-only"})
+                )
+                continue
+
+            # ---- sheet open: send a sheet's stored CRDT state to this client ----
+            if mtype == "s:open":
+                sid = str(msg.get("sheetId") or "")
+                if not re.match(r"^(main|[a-f0-9]{12})$", sid):
+                    continue
+                payload = {"type": "s:state", "sheetId": sid}
+                if sid == "main":
+                    supdates = await storage.get_yupdates(slug)
+                else:
+                    supdates = await storage.get_sheet_yupdates(slug, sid)
+                if supdates:
+                    payload["yUpdatesB64"] = _yupdates_b64(supdates)
+                await websocket.send_text(json.dumps(payload))
+                continue
+
+            # ---- sheet-scoped CRDT relay ----
+            if mtype == "s:yupdate":
+                sid = str(msg.get("sheetId") or "")
+                if not re.match(r"^(main|[a-f0-9]{12})$", sid):
+                    continue
+                try:
+                    update = base64.b64decode(msg.get("updateB64") or "")
+                except Exception:
+                    continue
+                if not update or len(update) > MAX_YUPDATE_SIZE:
+                    continue
+                if sid == "main":
+                    await storage.append_yupdate(slug, update)
+                else:
+                    await storage.append_sheet_yupdate(slug, sid, update)
+                await manager.broadcast(
+                    slug,
+                    {"type": "s:yupdate", "sheetId": sid, "updateB64": base64.b64encode(update).decode()},
+                    exclude=websocket,
+                )
+                continue
+
+            # ---- sheet-scoped full-text edit (backup channel / non-CRDT clients) ----
+            if mtype == "s:edit":
+                sid = str(msg.get("sheetId") or "")
+                content = msg.get("content", "")
+                if len(content) > MAX_CONTENT_SIZE:
+                    await websocket.send_text(
+                        json.dumps({"type": "error", "code": "too_large", "message": "Content too large (max 400KB)"})
+                    )
+                    continue
+                current = await get_paste_doc(slug)
+                if not current:
+                    await websocket.send_text(
+                        json.dumps({"type": "error", "code": "expired", "message": "This paste has expired"})
+                    )
+                    await websocket.close(code=4410)
+                    break
+                if sid == "main":
+                    updated_at = now_utc()
+                    new_rev = await storage.append_revision(slug, content, updated_at)
+                    await storage.update_content(slug, content, updated_at, new_rev)
+                    await storage.clear_ystate(slug)
+                else:
+                    if not await storage.get_sheet(slug, sid):
+                        continue
+                    await storage.update_sheet_content(slug, sid, content)
+                    await storage.clear_sheet_ystate(slug, sid)
+                await manager.broadcast(
+                    slug,
+                    {"type": "s:edit", "sheetId": sid, "content": content, "updatedAt": now_utc().isoformat()},
+                    exclude=websocket,
+                )
+                continue
+
+            # ---- sheet language ----
+            if mtype == "s:language":
+                sid = str(msg.get("sheetId") or "")
+                lang = msg.get("language", "plaintext")
+                if sid == "main":
+                    await storage.update_language(slug, lang, now_utc())
+                else:
+                    if not await storage.get_sheet(slug, sid):
+                        continue
+                    await storage.update_sheet_language(slug, sid, lang)
+                await manager.broadcast(
+                    slug, {"type": "s:language", "sheetId": sid, "language": lang}, exclude=websocket
                 )
                 continue
 

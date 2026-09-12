@@ -66,6 +66,8 @@ class MongoStorage:
         await self.db.pastes.create_index("expiresAt", expireAfterSeconds=0)
         await self.db.revisions.create_index("slug", unique=True)
         await self.db.ystate.create_index("slug", unique=True)
+        await self.db.sheets.create_index([("slug", 1), ("sheetId", 1)], unique=True)
+        await self.db.ystate_sheets.create_index([("slug", 1), ("sheetId", 1)], unique=True)
 
     async def shutdown(self):
         self.client.close()
@@ -101,6 +103,8 @@ class MongoStorage:
         await self.db.pastes.delete_one({"slug": slug})
         await self.db.revisions.delete_one({"slug": slug})
         await self.db.ystate.delete_one({"slug": slug})
+        await self.db.sheets.delete_many({"slug": slug})
+        await self.db.ystate_sheets.delete_many({"slug": slug})
 
     async def increment_views(self, slug: str):
         await self.db.pastes.update_one({"slug": slug}, {"$inc": {"views": 1}})
@@ -195,6 +199,83 @@ class MongoStorage:
                     pass
         except Exception as e:
             logger.warning(f"Image purge failed for {slug}: {e}")
+
+    # ---- sheets (multiple pages per paste) ----
+    async def list_sheets(self, slug: str):
+        cursor = self.db.sheets.find({"slug": slug}).sort("position", 1)
+        return [
+            {"sheetId": d["sheetId"], "name": d["name"], "position": d.get("position", 0)}
+            async for d in cursor
+        ]
+
+    async def get_sheet(self, slug: str, sheet_id: str):
+        d = await self.db.sheets.find_one({"slug": slug, "sheetId": sheet_id})
+        if not d:
+            return None
+        return {
+            "sheetId": d["sheetId"],
+            "name": d["name"],
+            "content": d.get("content", ""),
+            "language": d.get("language", "plaintext"),
+            "position": d.get("position", 0),
+        }
+
+    async def insert_sheet(self, slug: str, sheet_id: str, name: str, content: str,
+                           language: str, position: int, created_at):
+        await self.db.sheets.insert_one(
+            {
+                "slug": slug,
+                "sheetId": sheet_id,
+                "name": name,
+                "content": content,
+                "language": language,
+                "position": position,
+                "createdAt": _parse_dt(created_at),
+            }
+        )
+
+    async def rename_sheet(self, slug: str, sheet_id: str, name: str):
+        await self.db.sheets.update_one(
+            {"slug": slug, "sheetId": sheet_id}, {"$set": {"name": name}}
+        )
+
+    async def update_sheet_language(self, slug: str, sheet_id: str, language: str):
+        await self.db.sheets.update_one(
+            {"slug": slug, "sheetId": sheet_id}, {"$set": {"language": language}}
+        )
+
+    async def update_sheet_content(self, slug: str, sheet_id: str, content: str):
+        await self.db.sheets.update_one(
+            {"slug": slug, "sheetId": sheet_id}, {"$set": {"content": content}}
+        )
+
+    async def reorder_sheets(self, slug: str, sheet_ids: list):
+        for pos, sid in enumerate(sheet_ids):
+            await self.db.sheets.update_one(
+                {"slug": slug, "sheetId": sid}, {"$set": {"position": pos}}
+            )
+
+    async def delete_sheet(self, slug: str, sheet_id: str):
+        await self.db.sheets.delete_one({"slug": slug, "sheetId": sheet_id})
+        await self.db.ystate_sheets.delete_one({"slug": slug, "sheetId": sheet_id})
+
+    async def count_sheets(self, slug: str) -> int:
+        return await self.db.sheets.count_documents({"slug": slug})
+
+    # ---- CRDT state for sheets ----
+    async def get_sheet_yupdates(self, slug: str, sheet_id: str):
+        d = await self.db.ystate_sheets.find_one({"slug": slug, "sheetId": sheet_id})
+        return (d or {}).get("updates", [])
+
+    async def append_sheet_yupdate(self, slug: str, sheet_id: str, update: bytes):
+        await self.db.ystate_sheets.update_one(
+            {"slug": slug, "sheetId": sheet_id},
+            {"$push": {"updates": {"$each": [update], "$slice": -1000}}},
+            upsert=True,
+        )
+
+    async def clear_sheet_ystate(self, slug: str, sheet_id: str):
+        await self.db.ystate_sheets.delete_one({"slug": slug, "sheetId": sheet_id})
 
     async def purge_expired(self):
         # Mongo TTL index handles paste expiry; purge orphaned files lazily.
@@ -310,6 +391,27 @@ class SQLiteStorage:
                 PRIMARY KEY (slug, idx)
             )"""
         )
+        await self._conn.execute(
+            """CREATE TABLE IF NOT EXISTS sheets (
+                slug TEXT NOT NULL,
+                sheet_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                content TEXT NOT NULL DEFAULT '',
+                language TEXT NOT NULL DEFAULT 'plaintext',
+                position INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (slug, sheet_id)
+            )"""
+        )
+        await self._conn.execute(
+            """CREATE TABLE IF NOT EXISTS ystate_sheets (
+                slug TEXT NOT NULL,
+                sheet_id TEXT NOT NULL,
+                idx INTEGER NOT NULL,
+                "update" BLOB NOT NULL,
+                PRIMARY KEY (slug, sheet_id, idx)
+            )"""
+        )
         # Migrations for databases created before v2.0
         cur = await self._conn.execute("PRAGMA table_info(pastes)")
         cols = {row[1] for row in await cur.fetchall()}
@@ -372,6 +474,8 @@ class SQLiteStorage:
             await self._conn.execute("DELETE FROM pastes WHERE slug = ?", (slug,))
             await self._conn.execute("DELETE FROM revisions WHERE slug = ?", (slug,))
             await self._conn.execute("DELETE FROM ystate WHERE slug = ?", (slug,))
+            await self._conn.execute("DELETE FROM sheets WHERE slug = ?", (slug,))
+            await self._conn.execute("DELETE FROM ystate_sheets WHERE slug = ?", (slug,))
             await self._conn.commit()
 
     async def increment_views(self, slug: str):
@@ -545,6 +649,133 @@ class SQLiteStorage:
             await self._conn.execute("DELETE FROM ystate WHERE slug = ?", (slug,))
             await self._conn.commit()
 
+    # ---- sheets (multiple pages per paste) ----
+    async def list_sheets(self, slug: str):
+        async with self._lock:
+            cur = await self._conn.execute(
+                "SELECT sheet_id, name, position FROM sheets WHERE slug = ? ORDER BY position ASC, created_at ASC",
+                (slug,),
+            )
+            return [
+                {"sheetId": r["sheet_id"], "name": r["name"], "position": r["position"]}
+                for r in await cur.fetchall()
+            ]
+
+    async def get_sheet(self, slug: str, sheet_id: str):
+        async with self._lock:
+            cur = await self._conn.execute(
+                "SELECT * FROM sheets WHERE slug = ? AND sheet_id = ?", (slug, sheet_id)
+            )
+            row = await cur.fetchone()
+        if not row:
+            return None
+        return {
+            "sheetId": row["sheet_id"],
+            "name": row["name"],
+            "content": row["content"],
+            "language": row["language"],
+            "position": row["position"],
+        }
+
+    async def insert_sheet(self, slug: str, sheet_id: str, name: str, content: str,
+                           language: str, position: int, created_at):
+        async with self._lock:
+            await self._conn.execute(
+                """INSERT INTO sheets (slug, sheet_id, name, content, language, position, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (slug, sheet_id, name, content, language, position, _iso(created_at)),
+            )
+            await self._conn.commit()
+
+    async def rename_sheet(self, slug: str, sheet_id: str, name: str):
+        async with self._lock:
+            await self._conn.execute(
+                "UPDATE sheets SET name = ? WHERE slug = ? AND sheet_id = ?", (name, slug, sheet_id)
+            )
+            await self._conn.commit()
+
+    async def update_sheet_language(self, slug: str, sheet_id: str, language: str):
+        async with self._lock:
+            await self._conn.execute(
+                "UPDATE sheets SET language = ? WHERE slug = ? AND sheet_id = ?",
+                (language, slug, sheet_id),
+            )
+            await self._conn.commit()
+
+    async def update_sheet_content(self, slug: str, sheet_id: str, content: str):
+        async with self._lock:
+            await self._conn.execute(
+                "UPDATE sheets SET content = ? WHERE slug = ? AND sheet_id = ?",
+                (content, slug, sheet_id),
+            )
+            await self._conn.commit()
+
+    async def reorder_sheets(self, slug: str, sheet_ids: list):
+        async with self._lock:
+            for pos, sid in enumerate(sheet_ids):
+                await self._conn.execute(
+                    "UPDATE sheets SET position = ? WHERE slug = ? AND sheet_id = ?",
+                    (pos, slug, sid),
+                )
+            await self._conn.commit()
+
+    async def delete_sheet(self, slug: str, sheet_id: str):
+        async with self._lock:
+            await self._conn.execute(
+                "DELETE FROM sheets WHERE slug = ? AND sheet_id = ?", (slug, sheet_id)
+            )
+            await self._conn.execute(
+                "DELETE FROM ystate_sheets WHERE slug = ? AND sheet_id = ?",
+                (slug, sheet_id),
+            )
+            await self._conn.commit()
+
+    async def count_sheets(self, slug: str) -> int:
+        async with self._lock:
+            cur = await self._conn.execute(
+                "SELECT COUNT(*) AS n FROM sheets WHERE slug = ?", (slug,)
+            )
+            return (await cur.fetchone())["n"]
+
+    # ---- CRDT state for sheets (ordered update lists) ----
+    async def get_sheet_yupdates(self, slug: str, sheet_id: str):
+        async with self._lock:
+            cur = await self._conn.execute(
+                'SELECT "update" FROM ystate_sheets WHERE slug = ? AND sheet_id = ? ORDER BY idx ASC',
+                (slug, sheet_id),
+            )
+            return [r["update"] for r in await cur.fetchall()]
+
+    async def append_sheet_yupdate(self, slug: str, sheet_id: str, update: bytes):
+        async with self._lock:
+            cur = await self._conn.execute(
+                "SELECT COALESCE(MAX(idx), -1) + 1 FROM ystate_sheets WHERE slug = ? AND sheet_id = ?",
+                (slug, sheet_id),
+            )
+            idx = (await cur.fetchone())[0]
+            if idx >= self.MAX_YUPDATES_STORED:
+                await self._conn.execute(
+                    "DELETE FROM ystate_sheets WHERE slug = ? AND sheet_id = ? AND idx < ?",
+                    (slug, sheet_id, idx // 2),
+                )
+                cur = await self._conn.execute(
+                    "SELECT COALESCE(MAX(idx), -1) + 1 FROM ystate_sheets WHERE slug = ? AND sheet_id = ?",
+                    (slug, sheet_id),
+                )
+                idx = (await cur.fetchone())[0]
+            await self._conn.execute(
+                'INSERT INTO ystate_sheets (slug, sheet_id, idx, "update") VALUES (?, ?, ?, ?)',
+                (slug, sheet_id, idx, update),
+            )
+            await self._conn.commit()
+
+    async def clear_sheet_ystate(self, slug: str, sheet_id: str):
+        async with self._lock:
+            await self._conn.execute(
+                "DELETE FROM ystate_sheets WHERE slug = ? AND sheet_id = ?", (slug, sheet_id)
+            )
+            await self._conn.commit()
+
     async def purge_expired(self):
         """Delete expired pastes and their images (SQLite has no TTL index)."""
         now = now_utc().isoformat()
@@ -566,6 +797,8 @@ class SQLiteStorage:
             n = (await cur.fetchone())["n"]
             await self._conn.execute("DELETE FROM pastes")
             await self._conn.execute("DELETE FROM images")
+            await self._conn.execute("DELETE FROM sheets")
+            await self._conn.execute("DELETE FROM ystate_sheets")
             await self._conn.commit()
         removed = 0
         try:

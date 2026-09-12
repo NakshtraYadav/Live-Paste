@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.1.0] - 2026-09
+
+### Added
+- **Multiple pages/sheets per paste** — one link now holds a whole set of pages. A tab bar above the editor lets you add pages (`+ Page`), switch between them, rename with double-click, and delete non-primary pages. Each page keeps its own content, syntax language, and CRDT state.
+- Sheet-aware real-time sync — CRDT updates relay per sheet (`s:yupdate`), background pages keep receiving updates while you work on another one, and new joiners pull a sheet's stored state on open (`s:open` → `s:state`). Full-text fallback per sheet (`s:edit`) included.
+- New REST endpoints: `GET /paste/{slug}/sheets`, `GET /paste/{slug}/sheets/{id}`, `POST /paste/{slug}/sheets`, `PATCH /paste/{slug}/sheets/{id}` (rename/language), `DELETE /paste/{slug}/sheets/{id}` — all writes token-gated like the rest of the API.
+- The original document is always available as the **"Page 1"** (`main`) sheet and cannot be deleted, so existing links behave exactly as before.
+- Storage: new `sheets` + `ystate_sheets` tables (SQLite) and collections (MongoDB) with automatic migration of existing databases.
+
+---
+
 ## [2.0.0] - 2026-09
 
 ### Added
