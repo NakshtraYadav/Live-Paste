@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.4.0] - 2026-09
+
+### Added
+- **Offline-first pastes (PWA).** LivePaste is now an installable app that works
+  without a connection:
+  - Service worker caches the app shell (cache-first with background revalidate)
+    and falls back to cached API reads when the network is gone; writes and
+    WebSockets are never intercepted.
+  - Web app manifest + favicon — "Install LivePaste" from the browser menu.
+  - Every paste's Y.Doc is mirrored into IndexedDB, so edits survive reloads and
+    connectivity loss and auto-merge when the socket returns.
+  - Offline cold start: if the server is unreachable, the editor hydrates from
+    the local IndexedDB copy and keeps accepting edits (queued CRDT updates
+    drain on reconnect, plus a 10s recovery poll).
+  - "Offline — edits will sync" toolbar badge with a live online/offline signal.
+
+---
+
 ## [2.3.0] - 2026-09
 
 ### Added

@@ -21,6 +21,7 @@ import {
   Pencil,
   Eye as EyeIcon,
   X,
+  CloudOff,
   RotateCcw,
   ArrowUpCircle,
   Share2,
@@ -44,6 +45,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import InlineBlocksEditor, { parseBlocks } from "@/components/InlineBlocksEditor";
 import useCollab from "@/hooks/useCollab";
 import usePresence from "@/hooks/usePresence";
+import { useOfflineDoc, useOnlineStatus, readOfflineDoc } from "@/hooks/useOfflineDoc";
 import { getIdentity, setDisplayName } from "@/lib/identity";
 import { runInSandbox, detectLanguageOf } from "@/lib/runner";
 import {
@@ -110,6 +112,8 @@ export default function PastePage() {
   const dragDepthRef = useRef(0);
   const ydocRef = useRef(new Y.Doc());
   const applyingRemoteRef = useRef(false);
+  const gotInitRef = useRef(false);
+  const offlineTimerRef = useRef(null);
   const activeSheetRef = useRef("main");
   const sheetYdocsRef = useRef(new Map()); // sheetId → Y.Doc for background sheets
   const pendingUpdatesRef = useRef(new Map()); // sheetId → Uint8Array[] of missed updates
@@ -154,10 +158,41 @@ export default function PastePage() {
   // ---- WebSocket connection with auto-reconnect ----
   const connectWs = useCallback(() => {
     if (closedRef.current) return;
+    const existing = wsRef.current;
+    if (existing && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) return;
     const token = editTokenStore.get(slug);
     const ws = new WebSocket(`${WS_BASE}/api/ws/${slug}${token ? `?token=${encodeURIComponent(token)}` : ""}`);
     wsRef.current = ws;
     activeSheetRef.current = activeSheet;
+
+    // Offline cold start: if the handshake never completes (server down, no
+    // network), hydrate the editor from the IndexedDB mirror so the paste is
+    // still readable/editable. Queued CRDT updates merge on reconnect.
+    gotInitRef.current = false;
+    if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
+    offlineTimerRef.current = setTimeout(async () => {
+      if (gotInitRef.current || closedRef.current) return;
+      let cached = null;
+      try {
+        cached = await readOfflineDoc(slug, "main");
+      } catch (e) {
+        cached = null;
+      }
+      if (gotInitRef.current || closedRef.current) return;
+      if (cached) {
+        setContent(cached);
+        contentRef.current = cached;
+        const ytext = ydocRef.current.getText("content");
+        if (ytext.length === 0 && cached) {
+          ydocRef.current.transact(() => ytext.insert(0, cached));
+        }
+        setStatus("ready");
+        setConnState("disconnected");
+        toast.info("Offline — showing your locally saved copy. Edits sync when you reconnect.");
+      } else {
+        setConnState("disconnected");
+      }
+    }, 3500);
 
     ws.onopen = () => {
       retriesRef.current = 0;
@@ -173,6 +208,8 @@ export default function PastePage() {
       }
       switch (msg.type) {
         case "init":
+          gotInitRef.current = true;
+          if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
           setCanEdit(!!msg.canEdit);
           {
             const c = msg.paste.content || "";
@@ -406,6 +443,38 @@ export default function PastePage() {
     sheetRef: activeSheetRef,
   });
   const [myName, setMyName] = useState(() => getIdentity().name);
+
+  // ---- offline-first: mirror the Y.Doc into IndexedDB (survives reloads & offline) ----
+  useOfflineDoc({
+    slug,
+    ydocRef,
+    docVersion,
+    sheetRef: activeSheetRef,
+    enabled: status === "ready",
+  });
+  const online = useOnlineStatus();
+
+  // When connectivity returns after being fully offline, retry the socket so
+  // locally queued CRDT edits drain to the server. A slow periodic retry keeps
+  // recovery alive even after the exponential backoff has given up.
+  useEffect(() => {
+    if (online && connState === "disconnected" && !closedRef.current) {
+      retriesRef.current = 0;
+      connectWs();
+      const iv = setInterval(() => {
+        const ws = wsRef.current;
+        if (
+          !ws ||
+          (ws.readyState !== WebSocket.OPEN && ws.readyState !== WebSocket.CONNECTING)
+        ) {
+          retriesRef.current = 0;
+          connectWs();
+        }
+      }, 10000);
+      return () => clearInterval(iv);
+    }
+    return undefined;
+  }, [online, connState, connectWs]);
 
   // Idle heartbeat: keeps my cursor entry fresh on peers' screens while I'm
   // present but not typing (server prunes after 30s of silence).
@@ -1154,6 +1223,16 @@ export default function PastePage() {
               <span className="sr-only">Connection status:</span>
               {connLabel}
             </span>
+
+            {!online && (
+              <Badge
+                variant="outline"
+                className="rounded-full gap-1.5 font-mono text-xs text-amber-600 border-amber-500/40"
+                data-testid="paste-toolbar-offline-badge"
+              >
+                <CloudOff className="h-3 w-3" /> Offline — edits will sync
+              </Badge>
+            )}
 
             <ThemeToggle testId="paste-toolbar-theme-toggle" />
           </div>
