@@ -1555,6 +1555,7 @@ export default function PastePage() {
           onSelectionChange={sendCursor}
           runOutput={runOutput}
           onRunBlock={handleRunBlock}
+          onRequestAttachFile={canEdit ? () => fileInputRef.current?.click() : undefined}
         />
 
         {/* History side panel */}

@@ -1,13 +1,15 @@
 import React, {
   useMemo,
   useRef,
+  useState,
   useCallback,
   forwardRef,
   useImperativeHandle,
 } from "react";
 import Editor from "react-simple-code-editor";
 import axios from "axios";
-import { ExternalLink, Copy, Trash2, File, Download } from "lucide-react";import { highlightCode } from "@/lib/prismSetup";
+import { ExternalLink, Copy, Trash2, File, Download, CalendarDays, Minus, Code2, Paperclip } from "lucide-react";
+import { highlightCode } from "@/lib/prismSetup";
 import { API_BASE } from "@/lib/constants";
 import { detectLanguageOf } from "@/lib/runner";
 
@@ -104,7 +106,7 @@ const lineCountOf = (block) => {
 };
 
 const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
-  { content, language, placeholder, onChange, onDeleteImage, onCopyImageUrl, readOnly, remoteCursors, onSelectionChange, runOutput, onRunBlock },
+  { content, language, placeholder, onChange, onDeleteImage, onCopyImageUrl, readOnly, remoteCursors, onSelectionChange, runOutput, onRunBlock, onRequestAttachFile },
   ref,
 ) {
   const blocks = useMemo(() => parseBlocks(content), [content]);
@@ -323,6 +325,22 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
     const onFirstLine = !v.slice(0, s).includes("\n");
     const onLastLine = !v.slice(en).includes("\n");
 
+    if (slash && (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter" || e.key === "Escape") && index === slash.index) {
+      e.preventDefault();
+      if (e.key === "Escape") {
+        setSlash(null);
+      } else if (e.key === "Enter") {
+        const pick = slashMatches[slashSel] || slashMatches[0];
+        if (pick) applySlash(pick);
+      } else {
+        setSlashSel((s) =>
+          e.key === "ArrowDown"
+            ? Math.min(s + 1, slashMatches.length - 1)
+            : Math.max(s - 1, 0),
+        );
+      }
+      return;
+    }
     if (e.key === "Backspace" && atStart && index > 0) {
       e.preventDefault();
       removeFileBlockAt(index - 1);
@@ -352,11 +370,71 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
     }
   };
 
+  // ---- slash commands (v3.0.0): type "/" at line start for a Notion-style menu ----
+  const [slash, setSlash] = useState(null); // { index, taStart, query }
+  const [slashSel, setSlashSel] = useState(0);
+  const slashItems = React.useMemo(
+    () => [
+      { id: "date", label: "Date", hint: "Insert today's date", icon: CalendarDays },
+      { id: "divider", label: "Divider", hint: "Insert a horizontal rule", icon: Minus },
+      { id: "code", label: "Code block", hint: "Insert a fenced code block", icon: Code2 },
+      { id: "file", label: "Attach file", hint: "Upload any file into the paste", icon: Paperclip },
+    ],
+    [],
+  );
+  const slashMatches = slash
+    ? slashItems.filter((it) => it.label.toLowerCase().includes(slash.query.toLowerCase()))
+    : [];
+
+  const applySlash = (item) => {
+    if (!slash) return;
+    const b = blocks[slash.index];
+    const v = b?.value ?? "";
+    const start = slash.taStart;
+    const end = start + 1 + slash.query.length;
+    let insert = "";
+    let caretAfter = null;
+    if (item.id === "date") {
+      insert = new Date().toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
+    } else if (item.id === "divider") {
+      insert = "───────────";
+    } else if (item.id === "code") {
+      insert = "```\n\n```";
+      caretAfter = start + 4;
+    } else if (item.id === "file") {
+      setSlash(null);
+      if (onRequestAttachFile) onRequestAttachFile();
+      return;
+    }
+    const nv = v.slice(0, start) + insert + v.slice(end);
+    const next = blocks.map((x, i) => (i === slash.index ? { ...x, value: nv } : x));
+    commit(next);
+    setSlash(null);
+    requestAnimationFrame(() => focusTextAt(slash.index, caretAfter ?? start + insert.length));
+  };
+
   const handleBlockChange = (index) => (newValue) => {
     const next = blocks.map((b, i) =>
       i === index ? { ...b, value: newValue } : b,
     );
     commit(next);
+    // Slash-menu detection: "/" at the start of a line (with type-to-filter)
+    const ta = document.activeElement;
+    if (ta && ta.tagName === "TEXTAREA" && !readOnly) {
+      const pos = ta.selectionStart ?? 0;
+      const before = newValue.slice(0, pos);
+      const m = before.match(/(?:^|\n)\/([^\s\n]*)$/);
+      if (m) {
+        setSlash({ index, taStart: pos - m[1].length - 1, query: m[1] });
+        setSlashSel(0);
+      } else {
+        setSlash(null);
+      }
+    }
   };
 
   // ---- remote caret chip (name tag above a colored caret) ----
@@ -673,6 +751,31 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
                 )}
                 Run
               </button>
+            )}
+            {slash && slash.index === index && slashMatches.length > 0 && (
+              <div className="lp-slash-menu" data-testid="slash-menu">
+                {slashMatches.map((it, i) => {
+                  const Icon = it.icon;
+                  return (
+                    <button
+                      key={it.id}
+                      type="button"
+                      className={`lp-slash-item ${i === slashSel ? "lp-slash-active" : ""}`}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        applySlash(it);
+                      }}
+                      onMouseEnter={() => setSlashSel(i)}
+                    >
+                      <Icon className="h-4 w-4 shrink-0" />
+                      <span className="flex-1 text-left">
+                        <span className="block text-sm">{it.label}</span>
+                        <span className="block text-xs text-muted-foreground">{it.hint}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             )}
             <div
               className="lp-block-text flex-1"

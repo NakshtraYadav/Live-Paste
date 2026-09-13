@@ -295,6 +295,36 @@
   max-width: min(760px, calc(100vw - 140px));
 }
 
+/* Slash-command menu (v3.0.0) */
+.lp-slash-menu {
+  position: absolute;
+  z-index: 50;
+  left: 20px;
+  top: calc(100% + 2px);
+  min-width: 260px;
+  max-height: 240px;
+  overflow-y: auto;
+  background: hsl(var(--popover));
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+  padding: 4px;
+}
+
+.lp-slash-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 8px;
+  color: hsl(var(--popover-foreground));
+}
+
+.lp-slash-item.lp-slash-active {
+  background: hsl(var(--accent));
+}
+
 /* Media previews (v2.7.0): inline video, audio and PDF rendering */
 .lp-inline-media {
   display: block;

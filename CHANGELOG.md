@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.0.0] - 2026-09
+
+### Added
+- **Slash commands.** Type `/` at the start of any line for a Notion-style
+  command menu: **Date** (today's date), **Divider**, **Code block** (fenced,
+  with cursor placed inside), and **Attach file** (opens the file picker wired
+  to the any-file uploader). Type-to-filter, ↑/↓ to navigate, Enter to apply,
+  Esc to dismiss.
+
+---
+
 ## [2.9.0] - 2026-09
 
 ### Added
