@@ -25,6 +25,7 @@ import secrets
 import logging
 import asyncio
 import mimetypes
+from contextlib import asynccontextmanager
 from urllib.parse import quote
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
@@ -54,11 +55,108 @@ logging.basicConfig(
 )
 logger = logging.getLogger("livepaste")
 
-app = FastAPI(title="LivePaste")
+# ---------------- Lifecycle ----------------
+async def _cleanup_loop():
+    while True:
+        try:
+            await storage.purge_expired()
+        except Exception as e:
+            logger.warning(f"Expiry cleanup failed: {e}")
+        await asyncio.sleep(600)  # every 10 minutes
+
+
+def _is_ephemeral() -> bool:
+    """Session mode: only honored in local (SQLite) mode, set by the CLI."""
+    from .storage import SQLiteStorage
+
+    return (
+        os.environ.get("LIVEPASTE_EPHEMERAL", "0") == "1"
+        and isinstance(storage, SQLiteStorage)
+    )
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Modern lifespan handler (replaces the deprecated on_event hooks)."""
+    global storage, _cleanup_task
+    storage = create_storage()
+    await storage.startup()
+    if _is_ephemeral():
+        # Covers force-kill: clear anything left over from a previous session
+        await storage.purge_all()
+    _cleanup_task = asyncio.create_task(_cleanup_loop())
+    try:
+        yield
+    finally:
+        if _cleanup_task:
+            _cleanup_task.cancel()
+        if storage:
+            if _is_ephemeral():
+                # Peaceful exit: wipe this session's pastes and files
+                try:
+                    await storage.purge_all()
+                except Exception as e:
+                    logger.warning(f"Session cleanup on shutdown failed: {e}")
+            await storage.shutdown()
+
+
+app = FastAPI(title="LivePaste", lifespan=_lifespan)
 api_router = APIRouter(prefix="/api")
 
-storage = None  # set on startup
+storage = None  # set on startup (see _lifespan)
 _cleanup_task = None
+
+
+# ---------------- Auth brute-force protection (v3.2.0) ----------------
+#
+# The view-password surfaces (REST unlock + WebSocket handshake) are
+# unauthenticated oracles: without a cap, anyone can guess a locked paste's
+# password forever. Failures are tracked per (client ip, slug); once the cap
+# is hit, every attempt — even the correct password — is refused for the
+# lockout window. A correct password clears the record so honest users who
+# typo once are never locked out.
+
+PW_MAX_FAILURES = 8
+PW_LOCKOUT_S = 300  # 5 minutes
+
+pw_failures: Dict[str, List[float]] = {}
+
+
+def _pw_key(ip: str, slug: str) -> str:
+    return f"{ip}::{slug}"
+
+
+def _pw_blocked(ip: str, slug: str) -> bool:
+    key = _pw_key(ip, slug)
+    now = time.monotonic()
+    fails = [t for t in pw_failures.get(key, []) if now - t < PW_LOCKOUT_S]
+    if fails:
+        pw_failures[key] = fails
+    else:
+        pw_failures.pop(key, None)
+    return len(fails) >= PW_MAX_FAILURES
+
+
+def _pw_record_failure(ip: str, slug: str) -> None:
+    key = _pw_key(ip, slug)
+    pw_failures.setdefault(key, []).append(time.monotonic())
+    # opportunistic cleanup so the dict cannot grow without bound
+    if len(pw_failures) > 4096:
+        cutoff = time.monotonic() - PW_LOCKOUT_S
+        for k in [k for k, v in pw_failures.items() if not v or v[-1] <= cutoff]:
+            pw_failures.pop(k, None)
+
+
+def _pw_clear(ip: str, slug: str) -> None:
+    pw_failures.pop(_pw_key(ip, slug), None)
+
+
+def ws_client_ip(websocket) -> str:
+    fwd = websocket.headers.get("x-forwarded-for") if hasattr(websocket, "headers") else None
+    if fwd:
+        return fwd.split(",")[0].strip()
+    client = getattr(websocket, "client", None)
+    return client.host if client else "unknown"
 
 # ---------------- Constants ----------------
 MAX_CONTENT_SIZE = 400_000  # ~400KB max paste size
@@ -342,16 +440,28 @@ async def get_paste(slug: str, count_view: bool = False, clientId: str = "", pw:
 
 
 @api_router.post("/paste/{slug}/password")
-async def verify_paste_password(slug: str, body: dict):
-    """Check a view password without side effects (no view counted)."""
+async def verify_paste_password(slug: str, body: dict, request: Request):
+    """Check a view password without side effects (no view counted).
+
+    Brute-force guarded: after 8 failed attempts from one IP, further
+    attempts are refused for 5 minutes (429) — even the correct password.
+    A correct password resets the counter.
+    """
     paste = await get_paste_doc(slug)
     if not paste:
         raise HTTPException(status_code=404, detail="Paste not found or expired")
     pw_hash = paste.get("passwordHash")
     if not pw_hash:
         return {"ok": True, "locked": False}
+    ip = client_ip(request)
+    if _pw_blocked(ip, slug):
+        raise HTTPException(status_code=429, detail="Too many attempts — try again in a few minutes")
     provided = str(body.get("password") or "")
-    return {"ok": check_password(provided, pw_hash), "locked": True}
+    if check_password(provided, pw_hash):
+        _pw_clear(ip, slug)
+        return {"ok": True, "locked": True}
+    _pw_record_failure(ip, slug)
+    return {"ok": False, "locked": True}
 
 
 @api_router.post("/paste/{slug}/verify")
@@ -729,7 +839,7 @@ async def _try_send(ws: WebSocket, payload: str) -> bool:
 async def _try_close(ws: WebSocket, code: int) -> None:
     """Best-effort close that never raises (double-close raises otherwise)."""
     try:
-        ws.close(code=code)
+        await ws.close(code=code)
     except Exception:
         return
 
@@ -753,13 +863,25 @@ async def ws_paste(websocket: WebSocket, slug: str):
             return
 
         pw_hash = paste.get("passwordHash")
-        if pw_hash and not check_password(pw, pw_hash):
-            await _try_send(
-                websocket,
-                json.dumps({"type": "error", "code": "password_required", "message": "This paste is locked"}),
-            )
-            await _try_close(websocket, 4401)
-            return
+        if pw_hash:
+            # Same brute-force guard as the REST unlock endpoint.
+            wip = ws_client_ip(websocket)
+            if _pw_blocked(wip, slug):
+                await _try_send(
+                    websocket,
+                    json.dumps({"type": "error", "code": "too_many_attempts", "message": "Too many password attempts — try again in a few minutes"}),
+                )
+                await _try_close(websocket, 4429)
+                return
+            if not check_password(pw, pw_hash):
+                _pw_record_failure(wip, slug)
+                await _try_send(
+                    websocket,
+                    json.dumps({"type": "error", "code": "password_required", "message": "This paste is locked"}),
+                )
+                await _try_close(websocket, 4401)
+                return
+            _pw_clear(wip, slug)
 
         # Burn-after-read: opening the room counts as a view. The triggering
         # (Nth) reader still receives the content; the paste is destroyed behind
@@ -1061,6 +1183,7 @@ async def ws_paste(websocket: WebSocket, slug: str):
 # out of the data path entirely.
 
 signaling_rooms: Dict[str, Set[WebSocket]] = {}
+MAX_SIGNALING_CONNECTIONS = 512
 
 
 # NOTE: deliberately NOT /api/ws/signaling — that path would be shadowed by
@@ -1072,6 +1195,14 @@ async def ws_signaling(websocket: WebSocket):
         await websocket.accept()
     except Exception:
         return  # client vanished during the upgrade handshake
+    total = sum(len(room) for room in signaling_rooms.values())
+    if total >= MAX_SIGNALING_CONNECTIONS:
+        await _try_send(
+            websocket,
+            json.dumps({"type": "error", "message": "Signaling relay at capacity"}),
+        )
+        await _try_close(websocket, 1013)
+        return
     topics: Set[str] = set()
     try:
         while True:
@@ -1154,48 +1285,3 @@ if (STATIC_DIR / "index.html").exists() and os.environ.get("LIVEPASTE_SERVE_STAT
         ):
             return FileResponse(candidate)
         return FileResponse(STATIC_DIR / "index.html")
-
-
-# ---------------- Lifecycle ----------------
-async def _cleanup_loop():
-    while True:
-        try:
-            await storage.purge_expired()
-        except Exception as e:
-            logger.warning(f"Expiry cleanup failed: {e}")
-        await asyncio.sleep(600)  # every 10 minutes
-
-
-def _is_ephemeral() -> bool:
-    """Session mode: only honored in local (SQLite) mode, set by the CLI."""
-    from .storage import SQLiteStorage
-
-    return (
-        os.environ.get("LIVEPASTE_EPHEMERAL", "0") == "1"
-        and isinstance(storage, SQLiteStorage)
-    )
-
-
-@app.on_event("startup")
-async def on_startup():
-    global storage, _cleanup_task
-    storage = create_storage()
-    await storage.startup()
-    if _is_ephemeral():
-        # Covers force-kill: clear anything left over from a previous session
-        await storage.purge_all()
-    _cleanup_task = asyncio.create_task(_cleanup_loop())
-
-
-@app.on_event("shutdown")
-async def on_shutdown():
-    if _cleanup_task:
-        _cleanup_task.cancel()
-    if storage:
-        if _is_ephemeral():
-            # Peaceful exit: wipe this session's pastes and files
-            try:
-                await storage.purge_all()
-            except Exception as e:
-                logger.warning(f"Session cleanup on shutdown failed: {e}")
-        await storage.shutdown()

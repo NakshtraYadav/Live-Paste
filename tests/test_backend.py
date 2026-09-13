@@ -18,6 +18,7 @@ os.environ["LIVEPASTE_SERVE_STATIC"] = "0"  # no bundled frontend in tests
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+import livepaste.core as lpc
 from livepaste.core import app  # noqa: E402
 
 
@@ -26,6 +27,18 @@ def client():
     # Run startup/shutdown handlers
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture(autouse=True)
+def _reset_limiters():
+    """Fresh in-memory rate-limit and brute-force state for every test, so no
+    test can trip a per-IP budget (30 pastes/hour) or inherit another test's
+    password failures."""
+    lpc.limiter.events.clear()
+    lpc.pw_failures.clear()
+    yield
+    lpc.limiter.events.clear()
+    lpc.pw_failures.clear()
 
 
 def _create(client, **kw):
@@ -415,3 +428,50 @@ def test_ws_vanish_no_broadcast_crash(client):
 
         _t.sleep(0.1)
     assert client.get(f"/api/paste/{slug}").json()["content"] == "still alive"
+
+
+# ---------------- v3.2.0: password brute-force lockout ----------------
+
+def test_password_lockout_after_repeated_failures(client):
+    """After 8 wrong attempts from one IP, even the right password is refused."""
+    p = _create(client, content="locked secret", password="open sesame")
+    slug = p["slug"]
+    wrong = {"password": "wrong"}
+    right = {"password": "open sesame"}
+
+    for _ in range(8):
+        res = client.post(f"/api/paste/{slug}/password", json=wrong)
+        assert res.status_code == 200 and res.json()["ok"] is False
+
+    # 9th attempt — blocked even with the CORRECT password
+    res = client.post(f"/api/paste/{slug}/password", json=right)
+    assert res.status_code == 429
+
+    # Different slug is unaffected (lockout is per (ip, slug))
+    p2 = _create(client, content="other", password="pw2")
+    ok2 = client.post(f"/api/paste/{p2['slug']}/password", json={"password": "pw2"})
+    assert ok2.status_code == 200 and ok2.json()["ok"] is True
+
+
+def test_password_lockout_resets_on_success(client):
+    """A correct password clears the failure counter (honest typos don't lock out)."""
+    p = _create(client, content="reset me", password="s3cret")
+    slug = p["slug"]
+    for _ in range(3):
+        client.post(f"/api/paste/{slug}/password", json={"password": "nope"})
+    ok = client.post(f"/api/paste/{slug}/password", json={"password": "s3cret"})
+    assert ok.json()["ok"] is True
+    # Counter cleared: 8 more failures are needed before lockout
+    for i in range(8):
+        res = client.post(f"/api/paste/{slug}/password", json={"password": "nope"})
+        assert res.status_code == 200 and res.json()["ok"] is False, f"locked early at {i}"
+    blocked = client.post(f"/api/paste/{slug}/password", json={"password": "s3cret"})
+    assert blocked.status_code == 429
+
+
+def test_unlocked_paste_password_endpoint_unlimited(client):
+    """Unlocked pastes skip the limiter entirely (no oracle to protect)."""
+    p = _create(client, content="free")
+    for _ in range(12):
+        res = client.post(f"/api/paste/{p['slug']}/password", json={"password": "whatever"})
+        assert res.status_code == 200 and res.json() == {"ok": True, "locked": False}

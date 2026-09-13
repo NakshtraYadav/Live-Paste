@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.2.0] - 2026-09-14
+
+### Added
+- **Brute-force protection on password unlock.** Failed password attempts are
+  counted per IP + paste; 8 wrong tries locks unlock attempts for that paste
+  for 5 minutes (REST returns 429 with `Retry-After`; the WebSocket rejects
+  with `code 4004 too_many_attempts`). The unlock screen and socket reconnect
+  both surface a friendly "too many attempts" message.
+- **Connection cap on the P2P signaling relay** (32 concurrent signal
+  connections per paste topic) so a runaway tab can't pin the server.
+- **GitHub Actions CI** (`.github/workflows/ci.yml`): every push and pull
+  request now runs the offline pytest suite on Python 3.9/3.12 — server
+  regressions (like the handshake deadlock this release fixes) are caught
+  before they ship.
+- Six new tests: brute-force lockout on `/verify`, lockout reset by a correct
+  password, WS rejection after lockout, unlimited lockout for pastes without
+  a password, and limiter isolation between tests.
+
+### Changed
+- FastAPI app lifecycle migrated from the deprecated `@app.on_event` handlers
+  to a modern lifespan context manager (deprecation warnings dropped 5 → 1).
+- In-memory limiters (rate limits + lockouts) are now exposed for test resets,
+  and the test suite resets them per test so the creation rate limit budget
+  is never consumed by test volume.
+
+### Fixed
+- `_try_close` also awaited its coroutine now — same bug class as the 3.1.1
+  `_try_send` fix; found by a deprecation-warning audit of the disconnect path.
+
+---
+
 ## [3.1.1] - 2026-09-13
 
 ### Fixed
