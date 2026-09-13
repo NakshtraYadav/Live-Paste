@@ -24,6 +24,7 @@ import {
   CloudOff,
   Network,
   Mic,
+  QrCode,
   Flame,
   MonitorUp,
   CircleStop,
@@ -63,6 +64,7 @@ import {
 } from "@/lib/constants";
 import { editTokenStore, consumeEditTokenFromUrl } from "@/lib/editToken";
 import { useRecorder } from "@/hooks/useRecorder";
+import { QRCodeSVG } from "qrcode.react";
 
 const DEBOUNCE_MS = 250;
 const PING_INTERVAL_MS = 25000;
@@ -80,6 +82,7 @@ export default function PastePage() {
 
   const [status, setStatus] = useState("loading"); // loading | ready | notfound | expired | locked
   const [burnAfterViews, setBurnAfterViews] = useState(null);
+  const [showQr, setShowQr] = useState(false);
   const [content, setContent] = useState("");
   const [language, setLanguage] = useState("plaintext");
   const [viewers, setViewers] = useState(1);
@@ -1168,6 +1171,16 @@ export default function PastePage() {
                     <span className="block text-xs text-muted-foreground">Anyone can read & copy</span>
                   </span>
                 </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => setShowQr((v) => !v)}
+                  data-testid="paste-toolbar-qr-toggle"
+                >
+                  <QrCode className="mr-2 h-4 w-4" />
+                  <span className="flex-1">
+                    <span className="block text-sm font-medium">Show QR code</span>
+                    <span className="block text-xs text-muted-foreground">Scan to open on your phone</span>
+                  </span>
+                </DropdownMenuItem>
                 {canEdit && editToken && (
                   <DropdownMenuItem
                     onSelect={handleCopyEditLink}
@@ -1318,6 +1331,22 @@ export default function PastePage() {
               >
                 <Flame className="h-3 w-3" /> burns after {burnAfterViews} views
               </Badge>
+            )}
+
+            {showQr && (
+              <div
+                className="flex flex-col items-center gap-1 rounded-lg border border-border bg-card p-2 shadow-sm"
+                data-testid="paste-toolbar-qr"
+              >
+                <QRCodeSVG
+                  value={`${window.location.origin}/${slug}`}
+                  size={92}
+                  bgColor="transparent"
+                  fgColor="currentColor"
+                  data-testid="paste-toolbar-qr-canvas"
+                />
+                <span className="text-[10px] text-muted-foreground">scan to open</span>
+              </div>
             )}
 
             <span

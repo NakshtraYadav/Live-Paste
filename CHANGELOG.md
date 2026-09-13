@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.9.0] - 2026-09
+
+### Added
+- **QR code sharing.** "Show QR code" in the Share menu renders the paste's
+  URL as a crisp SVG QR right in the toolbar — scan with a phone and you're
+  in the paste. Perfect pairing with P2P LAN mode for demos.
+
+---
+
 ## [2.8.0] - 2026-09
 
 ### Added
