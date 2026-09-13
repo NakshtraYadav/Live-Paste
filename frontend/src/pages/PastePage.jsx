@@ -433,8 +433,32 @@ export default function PastePage() {
         /* ignore */
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, connectWs]);
+
+  // Close the socket the moment the page starts unloading (refresh, back,
+  // tab close). React unmount can race the browser teardown; this tells the
+  // server immediately instead of mid-handshake (fixes 1001 handshake noise).
+  useEffect(() => {
+    const bye = () => {
+      closedRef.current = true;
+      try {
+        const ws = wsRef.current;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.close(1001, "client navigating away");
+          wsRef.current = null;
+        }
+      } catch (e) {
+        /* ignore */
+      }
+    };
+    window.addEventListener("pagehide", bye);
+    window.addEventListener("beforeunload", bye);
+    return () => {
+      window.removeEventListener("pagehide", bye);
+      window.removeEventListener("beforeunload", bye);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---- expiry countdown ----
   useEffect(() => {

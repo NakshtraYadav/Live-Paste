@@ -13,6 +13,17 @@ LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Cre
 - **Instant live links** — random short slugs by default, or pick a custom slug (e.g. `/my-notes`)
 - **Edit vs. view links** — the link you share is read-only; a secret edit token (stored in your browser) controls who can change the paste. Share the edit link with people you trust.
 - **True concurrent editing (CRDT)** — Yjs-powered sync over WebSockets: multiple people can type at once with no lost keystrokes
+- **Multiple pages per paste** — a paste is a notebook: add named pages ("sheets"), each with its own content, language, and CRDT state; switch with a tab bar
+- **Live cursors & presence avatars** — see everyone's caret moving in real time with colored name tags (Yjs Awareness-style), plus avatar chips for every connected viewer
+- **Runnable pastes** — a Run button on JavaScript and Python blocks executes the code right in your browser (sandboxed JS worker; Python via Pyodide/WASM) and shows console output and the last expression value inline
+- **Offline-first PWA** — LivePaste is installable and keeps working offline: the app shell is cached by a service worker, every paste is mirrored to IndexedDB, edits made offline queue up and auto-merge when you reconnect
+- **Peer-to-peer LAN mode** — one click on the P2P toggle and document data flows browser-to-browser over WebRTC data channels; the server only brokers the handshake ("your data never touches the wire")
+- **Voice & screen notes** — record your microphone or your screen (with mic mix) from the toolbar; recordings upload like any file and play inline
+- **Inline media previews** — uploaded video, audio, and PDFs play right in the paste instead of showing a bare download card
+- **Burn-after-read & password lock** — make a paste self-destruct after N distinct viewers, and/or require a password to open it (bcrypt-hashed; secrets never leak in any API payload)
+- **QR code sharing** — "Show QR code" renders the paste URL as a QR for instant phone handoff
+- **Slash commands** — type `/` at the start of a line for a Notion-style menu: date, divider, code block, attach file
+- **Floating emoji reactions** — react with an emoji and it drifts up everyone's editor with your name and color
 - **Revision history** — every edit is snapshotted (last 50); browse and restore from the History side panel
 - **Syntax highlighting** — Prism-powered highlighting for Python, JavaScript, TypeScript, and many more languages
 - **Inline images (Google Docs style)** — paste, drop, or upload screenshots and they render right at your cursor position in the document (up to 100 MB each), with hover controls to open, copy URL, or delete
@@ -97,7 +108,8 @@ livepaste update
 | Frontend   | React 19, Tailwind CSS, shadcn/ui, Prism (highlighting)    |
 | Backend    | FastAPI (Python), WebSockets, pluggable storage layer      |
 | Storage    | Local mode: SQLite + files · Hosted mode: MongoDB + GridFS |
-| Realtime   | Native WebSockets at `/api/ws/{slug}` with room broadcast  |
+| Realtime   | Native WebSockets at `/api/ws/{slug}`, Yjs CRDT, optional y-webrtc P2P (signaling at `/api/webrtc/signaling`)  |
+| Runtime    | Pyodide (in-browser Python), sandboxed JS worker, MediaRecorder, service worker + IndexedDB (offline)  |
 | Packaging  | pip-installable `livepaste` CLI with bundled frontend      |
 
 ## Project Structure
@@ -134,7 +146,7 @@ All backend routes are prefixed with `/api`.
 | Method   | Endpoint                   | Description                                                                 |
 | -------- | -------------------------- | --------------------------------------------------------------------------- |
 | `GET`    | `/api/health`              | Health check                                                                |
-| `POST`   | `/api/paste`               | Create a paste. Body: `content`, `language`, optional `customSlug`, `expiry` (`1h` \| `1d` \| `1w` \| `never`) |
+| `POST`   | `/api/paste`               | Create a paste. Body: `content`, `language`, optional `customSlug`, `expiry` (`1h` \| `1d` \| `1w` \| `never`), `burnAfterViews` (int, self-destruct after N distinct viewers), `password` (view password) |
 | `GET`    | `/api/paste/{slug}`        | Fetch a paste; `?count_view=true` increments the view counter               |
 | `GET`    | `/api/version`             | Server version (drives the web update banner)                              |
 | `POST`   | `/api/paste/{slug}/verify` | Check an edit token → `{canEdit}`                                          |
@@ -152,12 +164,14 @@ All backend routes are prefixed with `/api`.
 
 | Endpoint         | Description                                                              |
 | ---------------- | ------------------------------------------------------------------------ |
-| `/api/ws/{slug}` | Join a paste room (`?token=<editToken>` to edit). Receives edit/CRDT broadcasts, presence, revision restores. Unknown slugs receive `{type: "error", code: "not_found"}`; write attempts from read-only connections receive `code: "read_only"`. |
+| `/api/ws/{slug}` | Join a paste room (`?token=<editToken>` to edit, `?pw=<password>` for locked pastes, `?clientId=<id>` for burn-after-read dedup). Receives edit/CRDT broadcasts (per-sheet `s:yupdate`), presence, live cursors, reactions, revision restores. Unknown slugs receive `{type: "error", code: "not_found"}`; locked pastes `code: "password_required"`; write attempts from read-only connections `code: "read_only"`. |
+| `/api/webrtc/signaling` | Dumb y-webrtc-compatible signaling relay (`subscribe`/`publish` on `lp:<slug>:<sheet>` topics) used by P2P LAN mode. Document data itself flows browser-to-browser, never through this endpoint. |
 
 ### Limits & Rules
 
 - Max paste size: **400 KB**
 - Max file size: **100 MB** per uploaded file — **no file type is ever rejected**; unknown extensions, executables, and extensionless files all work. Filenames are sanitized of path components/control chars only.
+- Edit tokens and password hashes are redacted from every API/WebSocket payload; passwords are bcrypt-hashed
 - Reserved slugs (`api`, `ws`, `static`, `new`, `about`, …) cannot be claimed
 - Custom slugs are validated; duplicates are rejected
 - Rate limits (per IP): 30 paste creations/hour, 60 uploads/hour
@@ -193,16 +207,7 @@ rm -rf livepaste/static && cp -r frontend/build livepaste/static
 
 ## Getting Started (Development)
 
-Services are managed by **supervisor** — backend on `0.0.0.0:8001`, frontend on `:3000`, MongoDB local.
-
-```bash
-# Install dependencies
-cd backend && pip install -r requirements.txt
-cd frontend && yarn install
-
-# Restart services
-sudo supervisorctl restart all
-```
+See **Development** under [Update system (CLI)](#update-system-cli) above: a venv + `pip install -e .` for the backend and `yarn dev` for the Vite frontend are all you need. No supervisor, no MongoDB — local mode runs on SQLite out of the box.
 
 ### Environment Variables
 
@@ -211,7 +216,7 @@ sudo supervisorctl restart all
 | `backend/.env`   | `MONGO_URL`              | MongoDB connection string (hosted mode; omit for SQLite)   |
 | `backend/.env`   | `DB_NAME`                | Database name (hosted mode)                                |
 | `backend/.env`   | `CORS_ORIGINS`           | Allowed CORS origins                                       |
-| `frontend/.env`  | `REACT_APP_BACKEND_URL`  | Backend URL baked into the build (omit for same-origin)    |
+| `frontend/.env`  | `VITE_BACKEND_URL`       | Backend URL baked into the build (omit for same-origin)    |
 | runtime          | `LIVEPASTE_DATA_DIR`     | Local-mode data directory (default `~/.livepaste`)         |
 | runtime          | `LIVEPASTE_PORT`         | Default port for `livepaste start`                         |
 | runtime          | `LIVEPASTE_REPO`         | GitHub `owner/repo` used for update checks                 |
@@ -223,7 +228,7 @@ sudo supervisorctl restart all
 1. Bump the number in `VERSION` and add a `CHANGELOG.md` entry
 2. Rebuild the bundled frontend so installs ship the latest UI:
    ```bash
-   cd frontend && REACT_APP_BACKEND_URL="" yarn build
+   cd frontend && VITE_BACKEND_URL="" yarn build
    rm -rf ../livepaste/static && cp -r build ../livepaste/static
    ```
 3. Push to GitHub — every installed copy will see the update notice on next start
@@ -235,9 +240,9 @@ sudo supervisorctl restart all
 
 ## How It Works
 
-1. **Create a link** — paste your text or code, optionally pick a custom slug, syntax, and expiry.
-2. **Share it** — send the URL to anyone; it opens straight in the browser.
-3. **Edit live together** — every keystroke syncs to all connected viewers in real time; expired pastes are cleaned up automatically.
+1. **Create a link** — paste your text or code, optionally pick a custom slug, syntax, expiry, burn-after-read, or password protection.
+2. **Share it** — send the URL (or show the QR code); it opens straight in the browser. Read-only by default; edit links are minted at creation and stored in your browser.
+3. **Edit live together** — every keystroke syncs to all connected viewers in real time via CRDT; cursors, presence, and reactions are shared; expired or burned pastes are cleaned up automatically.
 
 ---
 

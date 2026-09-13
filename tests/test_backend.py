@@ -374,3 +374,44 @@ def test_ws_init_does_not_leak_secrets(client):
         assert "passwordHash" not in init["paste"]
         assert "editToken" not in init["paste"]
         assert init["burnAfterViews"] == 3
+
+
+# ---------------- v3.1.1: handshake disconnect robustness ----------------
+
+def test_ws_vanish_before_init_does_not_leak_room(client):
+    """A client that disconnects mid-handshake must never stay in the room.
+
+    Regression for the uvicorn `ClientDisconnected` crash: the init send used
+    to run outside the try/except, so the ASGI task died before cleanup ran
+    and the dead socket kept counting as a viewer.
+    """
+    p = _create(client, content="vanish test")
+    slug, token = p["slug"], p["editToken"]
+
+    # Join and vanish immediately (context exit races the init delivery —
+    # the client never reads `init`, exactly like a tab navigating away)
+    with client.websocket_connect(f"/api/ws/{slug}?token={token}"):
+        pass
+
+    # The room must be empty now — no leaked socket, viewers back to 0
+    with client.websocket_connect(f"/api/ws/{slug}?token={token}") as probe:
+        init = probe.receive_json()
+        assert init["type"] == "init"
+        assert init["viewers"] == 1
+
+
+def test_ws_vanish_no_broadcast_crash(client):
+    """Broadcasting to a room whose socket died mid-handshake must not raise."""
+    p = _create(client, content="x")
+    slug, token = p["slug"], p["editToken"]
+    # Socket 1 joins and vanishes mid-handshake (never reads init)
+    with client.websocket_connect(f"/api/ws/{slug}?token={token}"):
+        pass
+    # Socket 2 edits — broadcast must not crash on any stale peer
+    with client.websocket_connect(f"/api/ws/{slug}?token={token}") as alive:
+        alive.receive_json()  # init
+        alive.send_json({"type": "edit", "content": "still alive"})
+        import time as _t
+
+        _t.sleep(0.1)
+    assert client.get(f"/api/paste/{slug}").json()["content"] == "still alive"

@@ -711,6 +711,29 @@ manager = RoomManager()
 MAX_YUPDATE_SIZE = 512 * 1024  # single Yjs update cap
 
 
+async def _try_send(ws: WebSocket, payload: str) -> bool:
+    """Best-effort send that never raises.
+
+    A client can vanish at any moment between our sends (tab closed, network
+    drop, navigation) — uvicorn raises ClientDisconnected / WebSocketDisconnect
+    on the very next send. Handshake and broadcast sends must not crash the
+    ASGI task for that; disconnects are the *normal* end of every socket.
+    """
+    try:
+        await ws.send_text(payload)
+        return True
+    except Exception:
+        return False
+
+
+async def _try_close(ws: WebSocket, code: int) -> None:
+    """Best-effort close that never raises (double-close raises otherwise)."""
+    try:
+        ws.close(code=code)
+    except Exception:
+        return
+
+
 @app.websocket("/api/ws/{slug}")
 async def ws_paste(websocket: WebSocket, slug: str):
     token = websocket.query_params.get("token") or ""
@@ -719,60 +742,65 @@ async def ws_paste(websocket: WebSocket, slug: str):
 
     await websocket.accept()
 
-    paste = await get_paste_doc(slug)
-    if not paste:
-        await websocket.send_text(
-            json.dumps({"type": "error", "code": "not_found", "message": "Paste not found or expired"})
-        )
-        await websocket.close(code=4404)
-        return
-
-    pw_hash = paste.get("passwordHash")
-    if pw_hash and not check_password(pw, pw_hash):
-        await websocket.send_text(
-            json.dumps({"type": "error", "code": "password_required", "message": "This paste is locked"})
-        )
-        await websocket.close(code=4401)
-        return
-
-    # Burn-after-read: opening the room counts as a view. The triggering
-    # (Nth) reader still receives the content; the paste is destroyed behind
-    # them so later joiners get not_found.
-    burn_note = None
-    view_info = await storage.register_view(slug, client_id)
-    if view_info:
-        if view_info.get("shouldBurn"):
-            await storage.purge_paste_files(slug)
-            await storage.delete_paste(slug)
-        burn_note = view_info.get("burnAfterViews") or None
-
-    stored = paste.get("editToken")
-    can_edit = (not stored) or bool(token) and secrets.compare_digest(token, str(stored))
-
-    await manager.join(slug, websocket, can_edit)
-
-    init_msg = {
-        "type": "init",
-        "paste": _redact_paste(paste),
-        "viewers": manager.viewer_count(slug),
-        "canEdit": can_edit,
-    }
-    if burn_note:
-        init_msg["burnAfterViews"] = burn_note
-    yupdates = await storage.get_yupdates(slug)
-    if yupdates:
-        init_msg["yUpdatesB64"] = _yupdates_b64(yupdates)
     try:
-        sheets = await storage.list_sheets(slug)
-    except Exception:
-        sheets = []
-    init_msg["sheets"] = _sheets_with_main(sheets)
-    await websocket.send_text(json.dumps(init_msg))
-    await manager.broadcast(
-        slug, {"type": "presence", "viewers": manager.viewer_count(slug)}, exclude=websocket
-    )
+        paste = await get_paste_doc(slug)
+        if not paste:
+            await _try_send(
+                websocket,
+                json.dumps({"type": "error", "code": "not_found", "message": "Paste not found or expired"}),
+            )
+            await _try_close(websocket, 4404)
+            return
 
-    try:
+        pw_hash = paste.get("passwordHash")
+        if pw_hash and not check_password(pw, pw_hash):
+            await _try_send(
+                websocket,
+                json.dumps({"type": "error", "code": "password_required", "message": "This paste is locked"}),
+            )
+            await _try_close(websocket, 4401)
+            return
+
+        # Burn-after-read: opening the room counts as a view. The triggering
+        # (Nth) reader still receives the content; the paste is destroyed behind
+        # them so later joiners get not_found.
+        burn_note = None
+        view_info = await storage.register_view(slug, client_id)
+        if view_info:
+            if view_info.get("shouldBurn"):
+                await storage.purge_paste_files(slug)
+                await storage.delete_paste(slug)
+            burn_note = view_info.get("burnAfterViews") or None
+
+        stored = paste.get("editToken")
+        can_edit = (not stored) or bool(token) and secrets.compare_digest(token, str(stored))
+
+        await manager.join(slug, websocket, can_edit)
+        joined = True
+
+        init_msg = {
+            "type": "init",
+            "paste": _redact_paste(paste),
+            "viewers": manager.viewer_count(slug),
+            "canEdit": can_edit,
+        }
+        if burn_note:
+            init_msg["burnAfterViews"] = burn_note
+        yupdates = await storage.get_yupdates(slug)
+        if yupdates:
+            init_msg["yUpdatesB64"] = _yupdates_b64(yupdates)
+        try:
+            sheets = await storage.list_sheets(slug)
+        except Exception:
+            sheets = []
+        init_msg["sheets"] = _sheets_with_main(sheets)
+        # The client may vanish mid-handshake (fast navigation); that's normal.
+        if not await _try_send(websocket, json.dumps(init_msg)):
+            return
+        await manager.broadcast(
+            slug, {"type": "presence", "viewers": manager.viewer_count(slug)}, exclude=websocket
+        )
+
         while True:
             raw = await websocket.receive_text()
             try:
@@ -1040,7 +1068,10 @@ signaling_rooms: Dict[str, Set[WebSocket]] = {}
 @app.websocket("/api/webrtc/signaling")
 async def ws_signaling(websocket: WebSocket):
     """y-webrtc-compatible signaling relay: subscribe/publish over topics."""
-    await websocket.accept()
+    try:
+        await websocket.accept()
+    except Exception:
+        return  # client vanished during the upgrade handshake
     topics: Set[str] = set()
     try:
         while True:

@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.1.1] - 2026-09-13
+
+### Fixed
+- **WebSocket handshake crash on fast navigation** (the reported
+  `ClientDisconnected` / `ConnectionClosedOK (1001)` traceback): a client that
+  closed the tab before the server finished sending `init` crashed the ASGI
+  task with an unhandled `WebSocketDisconnect`, and — worse — skipped room
+  cleanup, leaving a dead socket counted as a viewer forever. The entire
+  handshake (paste lookup, password gate, burn-after-read, init send) now runs
+  inside guarded error handling with best-effort sends (`_try_send`/
+  `_try_close`), and the `finally` cleanup (presence + peer-left broadcast)
+  always runs.
+- **Hardened the P2P signaling endpoint** the same way: a client vanishing
+  during the upgrade handshake no longer surfaces an error; per-topic rooms
+  are always cleaned up.
+- **Frontend closes the socket on `pagehide`/`beforeunload`** with code 1001,
+  telling the server *before* browser teardown instead of racing it — removes
+  the mid-handshake window where the 1001 noise originated.
+- **Test-suite regression fix**: the new disconnect tests initially deadlocked
+  the suite (a server helper shipped without awaiting its coroutine — caught
+  by the tests themselves, never released). All 27 offline tests pass in <1s.
+
+### Added
+- Two regression tests: a client vanishing mid-handshake must not leak its
+  room slot (viewer count returns to baseline), and broadcasting to a room
+  with vanished peers must not crash the editor.
+- README refreshed: full feature list for v2.2–v3.1 (pages, live cursors,
+  runnable pastes, offline PWA, P2P LAN mode, recordings, media previews,
+  burn/password, QR, slash commands, reactions), new API surface
+  (`/api/webrtc/signaling`, WS `pw`/`clientId` params, burn/password create
+  options), and corrected dev docs (Vite env var, no supervisor).
+
+---
+
 ## [3.1.0] - 2026-09
 
 ### Added
