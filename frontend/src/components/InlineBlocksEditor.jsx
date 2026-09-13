@@ -7,8 +7,7 @@ import React, {
 } from "react";
 import Editor from "react-simple-code-editor";
 import axios from "axios";
-import { ExternalLink, Copy, Trash2, File, Download } from "lucide-react";
-import { highlightCode } from "@/lib/prismSetup";
+import { ExternalLink, Copy, Trash2, File, Download } from "lucide-react";import { highlightCode } from "@/lib/prismSetup";
 import { API_BASE } from "@/lib/constants";
 import { detectLanguageOf } from "@/lib/runner";
 
@@ -418,6 +417,18 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
   const renderFileBlock = (block, index, startLine) => {
     const previewAsImage =
       block.type === "image" || isImageName(block.name);
+    // Media previews (v2.7.0): video files, audio files and PDFs render
+    // inline instead of a bare download card.
+    const lower = (block.name || "").toLowerCase();
+    const previewKind = previewAsImage
+      ? "image"
+      : /\.(mp4|webm|mov|mkv)$/.test(lower)
+        ? "video"
+        : /\.(mp3|wav|ogg|m4a|flac|aac)$/.test(lower)
+          ? "audio"
+          : /\.pdf$/.test(lower)
+            ? "pdf"
+            : null;
     const fileCursors = cursorMap[index] || [];
 
     return (
@@ -443,6 +454,27 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
               {caretChip(cur, i)}
             </span>
           ))}
+          {previewKind === "video" && (
+            <video
+              className="lp-inline-media"
+              src={block.url}
+              controls
+              preload="metadata"
+              playsInline
+              data-testid={`paste-inline-video-${block.id}`}
+            />
+          )}
+          {previewKind === "pdf" && (
+            <object
+              className="lp-inline-pdf"
+              data={block.url}
+              type="application/pdf"
+              aria-label={`PDF preview of ${block.name}`}
+              data-testid={`paste-inline-pdf-${block.id}`}
+            >
+              <iframe src={block.url} title={block.name} />
+            </object>
+          )}
           {previewAsImage ? (
             <div
               className="lp-inline-image group"
@@ -489,6 +521,15 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
               className="lp-inline-file group"
               data-testid={`paste-inline-file-${block.id}`}
             >
+              {previewKind === "audio" && (
+                <audio
+                  controls
+                  preload="metadata"
+                  src={block.url}
+                  className="lp-inline-audio w-full mb-2"
+                  data-testid={`paste-inline-audio-${block.id}`}
+                />
+              )}
               <span
                 className="lp-file-icon"
                 style={{ color: fileIconColor(block.name) }}

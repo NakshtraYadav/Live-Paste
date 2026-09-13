@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.7.0] - 2026-09
+
+### Added
+- **Inline media previews.** Video, audio and PDF attachments now render
+  playable/previewable inline instead of a bare download card:
+  - `<video>` player for mp4/webm/mov/mkv with native controls
+  - `<audio>` player for mp3/wav/ogg/m4a/flac/aac above the file card
+  - Embedded PDF viewer (`<object>` with iframe fallback) at 480px height
+  - Download/copy/delete actions unchanged; images preview as before.
+
+---
+
 ## [2.6.0] - 2026-09
 
 ### Added

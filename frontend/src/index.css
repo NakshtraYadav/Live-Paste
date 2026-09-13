@@ -295,6 +295,34 @@
   max-width: min(760px, calc(100vw - 140px));
 }
 
+/* Media previews (v2.7.0): inline video, audio and PDF rendering */
+.lp-inline-media {
+  display: block;
+  width: 100%;
+  max-width: min(760px, calc(100vw - 140px));
+  max-height: 440px;
+  border-radius: 10px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--muted));
+  margin-bottom: 6px;
+}
+
+.lp-inline-audio {
+  height: 36px;
+  border-radius: 8px;
+}
+
+.lp-inline-pdf {
+  display: block;
+  width: 100%;
+  max-width: min(760px, calc(100vw - 140px));
+  height: 480px;
+  border-radius: 10px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--muted));
+  margin-bottom: 6px;
+}
+
 .lp-inline-image img {
   display: block;
   max-width: 100%;
