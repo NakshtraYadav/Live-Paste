@@ -23,6 +23,9 @@ import {
   X,
   CloudOff,
   Network,
+  Mic,
+  MonitorUp,
+  CircleStop,
   RotateCcw,
   ArrowUpCircle,
   Share2,
@@ -58,6 +61,7 @@ import {
   formatTimeLeft,
 } from "@/lib/constants";
 import { editTokenStore, consumeEditTokenFromUrl } from "@/lib/editToken";
+import { useRecorder } from "@/hooks/useRecorder";
 
 const DEBOUNCE_MS = 250;
 const PING_INTERVAL_MS = 25000;
@@ -482,6 +486,14 @@ export default function PastePage() {
       return next;
     });
   }, []);
+
+  // ---- voice & screen notes: record → upload as a regular paste file ----
+  const recorder = useRecorder({
+    onComplete: async (blob, label) => {
+      const ext = blob.type.includes("webm") ? "webm" : blob.type.includes("mp4") ? "m4a" : "bin";
+      await uploadFile(new File([blob], `${label}-${Date.now()}.${ext}`, { type: blob.type }));
+    },
+  });
 
   // When connectivity returns after being fully offline, retry the socket so
   // locally queued CRDT edits drain to the server. A slow periodic retry keeps
@@ -1287,6 +1299,54 @@ export default function PastePage() {
                 </span>
               )}
             </button>
+
+            {recorder.recording ? (
+              <button
+                onClick={recorder.stop}
+                data-testid="paste-recording-indicator"
+                className="inline-flex items-center gap-1.5 rounded-full border border-destructive/50 bg-destructive/10 px-2.5 py-1 text-xs font-medium text-destructive animate-pulse"
+                title="Click to stop and attach the recording"
+              >
+                <Mic className="h-3 w-3" />
+                <span className="font-mono">REC {String(Math.floor(recorder.seconds / 60)).padStart(2, "0")}:{String(recorder.seconds % 60).padStart(2, "0")}</span>
+                <CircleStop className="h-3 w-3" />
+              </button>
+            ) : (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    data-testid="paste-record-button"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                    title="Record a voice note or your screen"
+                  >
+                    <Mic className="h-3 w-3" />
+                    <span className="hidden md:inline">Record</span>
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onSelect={() => recorder.start("voice")}
+                    data-testid="paste-record-voice"
+                  >
+                    <Mic className="mr-2 h-4 w-4" />
+                    <span className="flex-1">
+                      <span className="block text-sm font-medium">Voice note</span>
+                      <span className="block text-xs text-muted-foreground">Record from your microphone</span>
+                    </span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => recorder.start("screen")}
+                    data-testid="paste-record-screen"
+                  >
+                    <MonitorUp className="mr-2 h-4 w-4" />
+                    <span className="flex-1">
+                      <span className="block text-sm font-medium">Screen note</span>
+                      <span className="block text-xs text-muted-foreground">Capture your screen (+ mic)</span>
+                    </span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
 
             <ThemeToggle testId="paste-toolbar-theme-toggle" />
           </div>

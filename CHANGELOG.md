@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.6.0] - 2026-09
+
+### Added
+- **Voice & screen notes.** A "Record" button in the paste toolbar captures
+  your microphone or your screen (+ mic) with MediaRecorder and attaches the
+  result to the paste like any other file — turning LivePaste into an async
+  standup / feedback tool.
+  - Live REC indicator with elapsed time; click to stop & attach.
+  - Screen notes optionally mix in microphone audio; the browser's own
+    "Stop sharing" button ends the recording cleanly.
+  - Streams are always fully released on cancel/navigation (no stuck capture
+    indicators), recordings upload as `audio/webm` via the regular 100MB any-file
+    endpoint and sync to every viewer.
+
+---
+
 ## [2.5.0] - 2026-09
 
 ### Added
