@@ -10,6 +10,7 @@ import axios from "axios";
 import { ExternalLink, Copy, Trash2, File, Download } from "lucide-react";
 import { highlightCode } from "@/lib/prismSetup";
 import { API_BASE } from "@/lib/constants";
+import { detectLanguageOf } from "@/lib/runner";
 
 // A line that is exactly one file token:
 //   ![name](https://.../api/image/<24-hex>)   (legacy)
@@ -104,7 +105,7 @@ const lineCountOf = (block) => {
 };
 
 const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
-  { content, language, placeholder, onChange, onDeleteImage, onCopyImageUrl, readOnly, remoteCursors, onSelectionChange },
+  { content, language, placeholder, onChange, onDeleteImage, onCopyImageUrl, readOnly, remoteCursors, onSelectionChange, runOutput, onRunBlock },
   ref,
 ) {
   const blocks = useMemo(() => parseBlocks(content), [content]);
@@ -594,6 +595,13 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
         }
 
         const isLast = index === blocks.length - 1;
+        const RUNNABLE_SHEET = { javascript: true, js: true, typescript: true, python: true };
+        const runnable =
+          !!onRunBlock &&
+          typeof block.value === "string" &&
+          block.value.trim().length > 0 &&
+          (RUNNABLE_SHEET[language] || !!detectLanguageOf(block.value));
+        const showRun = runOutput && runOutput.blockIndex === index;
         return (
           <div
             className={`lp-block-row ${isLast ? "flex-1" : ""}`}
@@ -608,6 +616,23 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
                 <div key={i}>{startLine + i}</div>
               ))}
             </div>
+            {runnable && (
+              <button
+                type="button"
+                className="lp-run-button"
+                title="Run this block in a sandbox"
+                aria-label="Run block"
+                data-testid={`paste-run-button-${index}`}
+                onClick={() => onRunBlock(index)}
+              >
+                {showRun && runOutput.status === "running" ? (
+                  <span className="lp-run-spinner" aria-hidden="true" />
+                ) : (
+                  "▶"
+                )}
+                Run
+              </button>
+            )}
             <div
               className="lp-block-text flex-1"
               ref={(el) => {
@@ -659,6 +684,14 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
                   background: "transparent",
                 }}
               />
+              {showRun && (
+                <pre
+                  className={`lp-run-output ${runOutput.status === "error" ? "lp-run-error" : ""}`}
+                  data-testid={`paste-run-output-${index}`}
+                >
+                  {runOutput.output || (runOutput.status === "running" ? "Running…" : "(no output)")}
+                </pre>
+              )}
             </div>
           </div>
         );

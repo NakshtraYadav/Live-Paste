@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.3.0] - 2026-09
+
+### Added
+- **Runnable pastes — "Run" buttons on code blocks.** JavaScript runs in a
+  dedicated sandboxed Web Worker (5s timeout, captured console, no timers/DOM
+  access); Python runs on Pyodide (CPython 3.12 via WebAssembly), loaded
+  lazily from the CDN on first run and cached by the browser afterwards.
+  - Output panel renders inline under the executed block: console lines, the
+    last expression's value (REPL-style `⇒` for JS, repr for Python), and
+    error/timeout states.
+  - The Run button appears only when the sheet language is runnable or the
+    block's code plausibly is (sniffed automatically for plaintext sheets).
+
+---
+
 ## [2.2.0] - 2026-09
 
 ### Added

@@ -41,10 +41,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import InlineBlocksEditor from "@/components/InlineBlocksEditor";
+import InlineBlocksEditor, { parseBlocks } from "@/components/InlineBlocksEditor";
 import useCollab from "@/hooks/useCollab";
 import usePresence from "@/hooks/usePresence";
 import { getIdentity, setDisplayName } from "@/lib/identity";
+import { runInSandbox, detectLanguageOf } from "@/lib/runner";
 import {
   LANGUAGES,
   API_BASE,
@@ -95,6 +96,7 @@ export default function PastePage() {
   const [serverVersion, setServerVersion] = useState(null);
   const [latestRelease, setLatestRelease] = useState(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
+  const [runOutput, setRunOutput] = useState(null); // {blockIndex, status, output}
 
   const wsRef = useRef(null);
   const debounceRef = useRef(null);
@@ -416,6 +418,34 @@ export default function PastePage() {
     }, 12000);
     return () => clearInterval(iv);
   }, [canEdit, status, sendCursor]);
+
+  // ---- Runnable pastes: execute a text block in a sandbox ----
+  const handleRunBlock = useCallback(
+    async (blockIndex) => {
+      const blocks = parseBlocks(contentRef.current);
+      const block = blocks[blockIndex];
+      if (!block || block.type !== "text" || typeof block.value !== "string") return;
+      const code = block.value;
+      // The sheet's language if it's directly runnable, else sniff the code
+      const runnableSheet = { javascript: "javascript", js: "javascript", typescript: "javascript", python: "python" }[language];
+      const lang = runnableSheet || detectLanguageOf(code);
+      if (!lang) {
+        toast.error("Only JavaScript and Python blocks can run");
+        return;
+      }
+      setRunOutput({ blockIndex, status: "running", output: "" });
+      const res = await runInSandbox(lang, code);
+      const parts = (res.logs || []).map((l) => (l.level === "error" ? `✗ ${l.text}` : l.text));
+      if (res.result) parts.push(res.result);
+      if (!res.ok && res.error) parts.push(`Error: ${res.error}`);
+      setRunOutput({
+        blockIndex,
+        status: res.ok ? "done" : "error",
+        output: parts.join("\n") || (res.ok ? "(no output)" : res.error || "Error"),
+      });
+    },
+    [language],
+  );
 
   // Mirror remote CRDT changes into React state (text blocks re-render)
   const firstYRender = useRef(true);
@@ -1231,6 +1261,8 @@ export default function PastePage() {
           onCopyImageUrl={handleCopyFileUrl}
           remoteCursors={cursorsForSheet(activeSheet)}
           onSelectionChange={sendCursor}
+          runOutput={runOutput}
+          onRunBlock={handleRunBlock}
         />
 
         {/* History side panel */}
