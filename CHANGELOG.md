@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.8.0] - 2026-09
+
+### Added
+- **Burn-after-read.** Set "views before self-destruct" at creation (1–10000);
+  once that many *distinct* viewers have opened the paste it is destroyed —
+  files and CRDT state included. The triggering reader still gets the content;
+  everyone after finds it gone. Repeat views from the same client don't count
+  (per-client id via the presence identity), and a flame badge shows on paste
+  pages that will burn.
+- **Password lock.** Optionally require a view password at creation. Hashed
+  server-side (bcrypt when available, SHA-256 fallback — the hash never leaves
+  the server, `passwordHash` is stripped from every API/WS payload). Locked
+  links show an unlock screen; the password is kept session-only in memory and
+  sent as a WS query param, never persisted.
+
+### Security
+- REST `GET /paste/{slug}` and the WebSocket `init` payload now both pass
+  through a strict redaction filter (`editToken`, `passwordHash`, `burnedBy`
+  can no longer leak).
+
+---
+
 ## [2.7.0] - 2026-09
 
 ### Added

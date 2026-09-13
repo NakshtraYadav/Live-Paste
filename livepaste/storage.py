@@ -87,6 +87,9 @@ class MongoStorage:
             "expiresAt": _iso(doc.get("expiresAt")),
             "rev": doc.get("rev", 0),
             "editToken": doc.get("editToken"),
+            "burnAfterViews": doc.get("burnAfterViews"),
+            "passwordHash": doc.get("passwordHash"),
+            "burnedBy": doc.get("burnedBy") or [],
         }
 
     async def slug_exists(self, slug: str) -> bool:
@@ -108,6 +111,33 @@ class MongoStorage:
 
     async def increment_views(self, slug: str):
         await self.db.pastes.update_one({"slug": slug}, {"$inc": {"views": 1}})
+
+    async def register_view(self, slug: str, client_id: str):
+        """Mongo twin of SQLiteStorage.register_view (see there)."""
+        doc = await self.db.pastes.find_one(
+            {"slug": slug}, {"burnAfterViews": 1, "burnedBy": 1, "views": 1}
+        )
+        if not doc:
+            return None
+        burn_after = doc.get("burnAfterViews") or 0
+        burners = doc.get("burnedBy") or []
+        if burn_after and client_id and client_id not in burners:
+            burners = burners + [client_id]
+            await self.db.pastes.update_one(
+                {"slug": slug}, {"$set": {"burnedBy": burners[-2000:]}}
+            )
+        await self.db.pastes.update_one({"slug": slug}, {"$inc": {"views": 1}})
+        return {
+            "views": doc.get("views", 0) + 1,
+            "burnAfterViews": burn_after,
+            "burners": len(burners),
+            "shouldBurn": bool(burn_after and len(burners) >= burn_after),
+        }
+
+    async def update_password(self, slug: str, password_hash):
+        await self.db.pastes.update_one(
+            {"slug": slug}, {"$set": {"passwordHash": password_hash}}
+        )
 
     async def update_content(self, slug: str, content: str, updated_at, rev: int):
         await self.db.pastes.update_one(
@@ -361,9 +391,22 @@ class SQLiteStorage:
                 updated_at TEXT NOT NULL,
                 expires_at TEXT,
                 rev INTEGER NOT NULL DEFAULT 0,
-                edit_token TEXT
+                edit_token TEXT,
+                burn_after_views INTEGER,
+                password_hash TEXT,
+                burned_by TEXT
             )"""
         )
+        # Migration for pre-v2.8 databases
+        for col, ddl in (
+            ("burn_after_views", "ALTER TABLE pastes ADD COLUMN burn_after_views INTEGER"),
+            ("password_hash", "ALTER TABLE pastes ADD COLUMN password_hash TEXT"),
+            ("burned_by", "ALTER TABLE pastes ADD COLUMN burned_by TEXT"),
+        ):
+            try:
+                await self._conn.execute(ddl)
+            except Exception:
+                pass  # column already exists
         await self._conn.execute(
             """CREATE TABLE IF NOT EXISTS images (
                 id TEXT PRIMARY KEY,
@@ -443,6 +486,9 @@ class SQLiteStorage:
             "expiresAt": row["expires_at"],
             "rev": row["rev"],
             "editToken": row["edit_token"],
+            "burnAfterViews": row["burn_after_views"],
+            "passwordHash": row["password_hash"],
+            "burnedBy": (row["burned_by"] or "").split(",") if row["burned_by"] else [],
         }
 
     async def slug_exists(self, slug: str) -> bool:
@@ -453,8 +499,8 @@ class SQLiteStorage:
     async def insert_paste(self, paste: dict):
         async with self._lock:
             await self._conn.execute(
-                """INSERT INTO pastes (slug, content, language, views, created_at, updated_at, expires_at, rev, edit_token)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO pastes (slug, content, language, views, created_at, updated_at, expires_at, rev, edit_token, burn_after_views, password_hash, burned_by)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     paste["slug"],
                     paste["content"],
@@ -465,6 +511,9 @@ class SQLiteStorage:
                     _iso(paste["expiresAt"]),
                     paste.get("rev", 0),
                     paste.get("editToken"),
+                    paste.get("burnAfterViews"),
+                    paste.get("passwordHash"),
+                    ",".join(paste.get("burnedBy") or []),
                 ),
             )
             await self._conn.commit()
@@ -481,6 +530,43 @@ class SQLiteStorage:
     async def increment_views(self, slug: str):
         async with self._lock:
             await self._conn.execute("UPDATE pastes SET views = views + 1 WHERE slug = ?", (slug,))
+            await self._conn.commit()
+
+    async def register_view(self, slug: str, client_id: str):
+        """Count a view; for burn-after-read pastes also record unique burners.
+
+        Returns None when the paste is gone, else a dict with `shouldBurn`
+        (True once the number of distinct viewers reached burnAfterViews).
+        """
+        async with self._lock:
+            cur = await self._conn.execute(
+                "SELECT burn_after_views, burned_by, views FROM pastes WHERE slug = ?", (slug,)
+            )
+            row = await cur.fetchone()
+            if not row:
+                return None
+            burn_after = row["burn_after_views"] or 0
+            burners = (row["burned_by"] or "").split(",") if row["burned_by"] else []
+            if burn_after and client_id and client_id not in burners:
+                burners.append(client_id)
+                await self._conn.execute(
+                    "UPDATE pastes SET burned_by = ? WHERE slug = ?",
+                    (",".join(burners[:2000]), slug),
+                )
+            await self._conn.execute("UPDATE pastes SET views = views + 1 WHERE slug = ?", (slug,))
+            await self._conn.commit()
+            return {
+                "views": row["views"] + 1,
+                "burnAfterViews": burn_after,
+                "burners": len(burners),
+                "shouldBurn": bool(burn_after and len(burners) >= burn_after),
+            }
+
+    async def update_password(self, slug: str, password_hash):
+        async with self._lock:
+            await self._conn.execute(
+                "UPDATE pastes SET password_hash = ? WHERE slug = ?", (password_hash, slug)
+            )
             await self._conn.commit()
 
     async def update_content(self, slug: str, content: str, updated_at, rev: int):

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { toast } from "sonner";
-import { Link2, Zap, Users, Clock, ArrowRight, Loader2 } from "lucide-react";
+import { Link2, Zap, Users, Clock, Flame, Lock, ArrowRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -23,6 +23,8 @@ export default function HomePage() {
   const [customSlug, setCustomSlug] = useState("");
   const [language, setLanguage] = useState("plaintext");
   const [expiry, setExpiry] = useState("never");
+  const [burnAfterViews, setBurnAfterViews] = useState(""); // "" = off
+  const [password, setPassword] = useState("");
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
@@ -42,6 +44,8 @@ export default function HomePage() {
         customSlug: customSlug.trim() || null,
         language,
         expiry,
+        burnAfterViews: burnAfterViews ? Math.max(1, parseInt(burnAfterViews, 10) || 0) : null,
+        password: password || null,
       });
       const slug = res.data.slug;
       // The creator owns this paste — persist the edit token so they land in
@@ -145,6 +149,34 @@ export default function HomePage() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="sm:col-span-6">
+                <label className="text-xs text-muted-foreground mb-1.5 flex items-center gap-1">
+                  <Flame className="h-3 w-3" /> Burn after read
+                  <span className="opacity-60">(optional)</span>
+                </label>
+                <Input
+                  data-testid="create-paste-burn-input"
+                  type="number"
+                  min="1"
+                  value={burnAfterViews}
+                  onChange={(e) => setBurnAfterViews(e.target.value)}
+                  placeholder="Views before self-destruct — e.g. 3"
+                  className="font-mono text-sm"
+                />
+              </div>
+              <div className="sm:col-span-6">
+                <label className="text-xs text-muted-foreground mb-1.5 flex items-center gap-1">
+                  <Lock className="h-3 w-3" /> View password <span className="opacity-60">(optional)</span>
+                </label>
+                <Input
+                  data-testid="create-paste-password-input"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Readers must enter this to open the link"
+                  className="font-mono text-sm"
+                />
               </div>
             </div>
 

@@ -171,6 +171,8 @@ class PasteCreate(BaseModel):
     customSlug: Optional[str] = None
     language: str = "plaintext"
     expiry: str = "never"  # 1h | 1d | 1w | never
+    burnAfterViews: Optional[int] = None  # self-destruct after N distinct views
+    password: Optional[str] = None  # view password (hashed before storage)
 
 
 class RestoreBody(BaseModel):
@@ -274,23 +276,82 @@ async def create_paste(body: PasteCreate, request: Request):
         "rev": 0,
         "editToken": edit_token,
     }
+    if body.burnAfterViews is not None:
+        if not (1 <= body.burnAfterViews <= 10000):
+            raise HTTPException(status_code=400, detail="burnAfterViews must be between 1 and 10000")
+        paste["burnAfterViews"] = body.burnAfterViews
+    if body.password:
+        paste["passwordHash"] = hash_password(body.password[:200])
     await storage.insert_paste(paste)
 
-    public = {k: v for k, v in paste.items() if k != "editToken"}
+    public = _redact_paste(paste)
     public["editToken"] = edit_token  # returned ONCE, at creation
     return public
 
 
+try:
+    import bcrypt as _bcrypt
+
+    _HAS_BCRYPT = True
+except ImportError:  # pragma: no cover — fallback keeps tests running anywhere
+    _HAS_BCRYPT = False
+
+
+def hash_password(password: str) -> str:
+    if _HAS_BCRYPT:
+        return _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode()
+    return "sha256$" + hashlib.sha256(password.encode()).hexdigest()
+
+
+def check_password(password: str, stored: Optional[str]) -> bool:
+    if not stored:
+        return True
+    if stored.startswith("sha256$"):
+        return secrets.compare_digest("sha256$" + hashlib.sha256(password.encode()).hexdigest(), stored)
+    if _HAS_BCRYPT:
+        try:
+            return _bcrypt.checkpw(password.encode(), stored.encode())
+        except ValueError:
+            return False
+    return False
+
+
+def _redact_paste(paste: dict) -> dict:
+    """Public paste view — never leaks the edit token, password hash or burner list."""
+    return {k: v for k, v in paste.items() if k not in ("editToken", "passwordHash", "burnedBy")}
+
+
 @api_router.get("/paste/{slug}")
-async def get_paste(slug: str, count_view: bool = False):
+async def get_paste(slug: str, count_view: bool = False, clientId: str = "", pw: str = ""):
     paste = await get_paste_doc(slug)
     if not paste:
         raise HTTPException(status_code=404, detail="Paste not found or expired")
+    pw_hash = paste.get("passwordHash")
+    if pw_hash and not check_password(pw, pw_hash):
+        raise HTTPException(status_code=401, detail="Password required")
     if count_view:
-        await storage.increment_views(slug)
-        paste["views"] = paste.get("views", 0) + 1
-    public = {k: v for k, v in paste.items() if k != "editToken"}
-    return public
+        info = await storage.register_view(slug, clientId or "")
+        if info:
+            paste["views"] = info["views"]
+            if info.get("shouldBurn"):
+                # The triggering (Nth) reader still gets the content; everyone
+                # after this finds the paste gone (404).
+                await storage.purge_paste_files(slug)
+                await storage.delete_paste(slug)
+    return _redact_paste(paste)
+
+
+@api_router.post("/paste/{slug}/password")
+async def verify_paste_password(slug: str, body: dict):
+    """Check a view password without side effects (no view counted)."""
+    paste = await get_paste_doc(slug)
+    if not paste:
+        raise HTTPException(status_code=404, detail="Paste not found or expired")
+    pw_hash = paste.get("passwordHash")
+    if not pw_hash:
+        return {"ok": True, "locked": False}
+    provided = str(body.get("password") or "")
+    return {"ok": check_password(provided, pw_hash), "locked": True}
 
 
 @api_router.post("/paste/{slug}/verify")
@@ -653,6 +714,8 @@ MAX_YUPDATE_SIZE = 512 * 1024  # single Yjs update cap
 @app.websocket("/api/ws/{slug}")
 async def ws_paste(websocket: WebSocket, slug: str):
     token = websocket.query_params.get("token") or ""
+    pw = websocket.query_params.get("pw") or ""
+    client_id = websocket.query_params.get("clientId") or ""
 
     await websocket.accept()
 
@@ -664,6 +727,25 @@ async def ws_paste(websocket: WebSocket, slug: str):
         await websocket.close(code=4404)
         return
 
+    pw_hash = paste.get("passwordHash")
+    if pw_hash and not check_password(pw, pw_hash):
+        await websocket.send_text(
+            json.dumps({"type": "error", "code": "password_required", "message": "This paste is locked"})
+        )
+        await websocket.close(code=4401)
+        return
+
+    # Burn-after-read: opening the room counts as a view. The triggering
+    # (Nth) reader still receives the content; the paste is destroyed behind
+    # them so later joiners get not_found.
+    burn_note = None
+    view_info = await storage.register_view(slug, client_id)
+    if view_info:
+        if view_info.get("shouldBurn"):
+            await storage.purge_paste_files(slug)
+            await storage.delete_paste(slug)
+        burn_note = view_info.get("burnAfterViews") or None
+
     stored = paste.get("editToken")
     can_edit = (not stored) or bool(token) and secrets.compare_digest(token, str(stored))
 
@@ -671,10 +753,12 @@ async def ws_paste(websocket: WebSocket, slug: str):
 
     init_msg = {
         "type": "init",
-        "paste": {k: v for k, v in paste.items() if k != "editToken"},
+        "paste": _redact_paste(paste),
         "viewers": manager.viewer_count(slug),
         "canEdit": can_edit,
     }
+    if burn_note:
+        init_msg["burnAfterViews"] = burn_note
     yupdates = await storage.get_yupdates(slug)
     if yupdates:
         init_msg["yUpdatesB64"] = _yupdates_b64(yupdates)

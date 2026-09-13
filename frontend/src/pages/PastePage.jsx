@@ -24,6 +24,7 @@ import {
   CloudOff,
   Network,
   Mic,
+  Flame,
   MonitorUp,
   CircleStop,
   RotateCcw,
@@ -77,7 +78,8 @@ export default function PastePage() {
   const { slug } = useParams();
   const navigate = useNavigate();
 
-  const [status, setStatus] = useState("loading"); // loading | ready | notfound | expired
+  const [status, setStatus] = useState("loading"); // loading | ready | notfound | expired | locked
+  const [burnAfterViews, setBurnAfterViews] = useState(null);
   const [content, setContent] = useState("");
   const [language, setLanguage] = useState("plaintext");
   const [viewers, setViewers] = useState(1);
@@ -120,6 +122,8 @@ export default function PastePage() {
   const applyingRemoteRef = useRef(false);
   const gotInitRef = useRef(false);
   const offlineTimerRef = useRef(null);
+  // Session-only view passwords for locked pastes (never persisted to disk)
+  const lockedPastePasswords = useRef({});
   const activeSheetRef = useRef("main");
   const sheetYdocsRef = useRef(new Map()); // sheetId → Y.Doc for background sheets
   const pendingUpdatesRef = useRef(new Map()); // sheetId → Uint8Array[] of missed updates
@@ -167,7 +171,14 @@ export default function PastePage() {
     const existing = wsRef.current;
     if (existing && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) return;
     const token = editTokenStore.get(slug);
-    const ws = new WebSocket(`${WS_BASE}/api/ws/${slug}${token ? `?token=${encodeURIComponent(token)}` : ""}`);
+    const pw = lockedPastePasswords.current[slug] || "";
+    const clientId = getIdentity().clientId;
+    const params = new URLSearchParams();
+    if (token) params.set("token", token);
+    if (pw) params.set("pw", pw);
+    if (clientId) params.set("clientId", clientId);
+    const qs = params.toString();
+    const ws = new WebSocket(`${WS_BASE}/api/ws/${slug}${qs ? `?${qs}` : ""}`);
     wsRef.current = ws;
     activeSheetRef.current = activeSheet;
 
@@ -217,6 +228,7 @@ export default function PastePage() {
           gotInitRef.current = true;
           if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
           setCanEdit(!!msg.canEdit);
+          setBurnAfterViews(msg.burnAfterViews || null);
           {
             const c = msg.paste.content || "";
             setContent(c);
@@ -352,6 +364,9 @@ export default function PastePage() {
           } else if (msg.code === "expired") {
             closedRef.current = true;
             setStatus("expired");
+          } else if (msg.code === "password_required") {
+            closedRef.current = true;
+            setStatus("locked");
           } else if (msg.code === "too_large") {
             toast.error(msg.message || "Content too large");
           } else if (msg.code === "read_only") {
@@ -975,6 +990,51 @@ export default function PastePage() {
     );
   }
 
+  if (status === "locked") {
+    const submitPassword = async (e) => {
+      e.preventDefault();
+      const val = document.getElementById("lp-pw-input")?.value || "";
+      try {
+        const res = await axios.post(`${API_BASE}/api/paste/${slug}/password`, { password: val });
+        if (res.data.ok) {
+          lockedPastePasswords.current[slug] = val;
+          closedRef.current = false;
+          retriesRef.current = 0;
+          setStatus("loading");
+          connectWs();
+        } else {
+          toast.error("Wrong password");
+        }
+      } catch (err) {
+        toast.error(err?.response?.data?.detail === "Paste not found or expired" ? "Paste not found" : "Could not verify password");
+      }
+    };
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center px-4">
+        <div className="w-full max-w-sm border border-border bg-card rounded-xl p-6 sm:p-8" data-testid="locked-state">
+          <div className="h-10 w-10 rounded-lg bg-secondary flex items-center justify-center">
+            <KeyRound className="h-5 w-5 text-muted-foreground" />
+          </div>
+          <h1 className="mt-4 text-xl font-semibold">This paste is locked</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Enter the view password the owner shared with you.
+          </p>
+          <form onSubmit={submitPassword} className="mt-5 flex gap-2">
+            <input
+              id="lp-pw-input"
+              type="password"
+              autoFocus
+              data-testid="locked-password-input"
+              placeholder="Password"
+              className="flex-1 font-mono text-sm bg-[hsl(var(--editor-bg))] text-[hsl(var(--editor-fg))] border border-border rounded-md px-3 h-9 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]"
+            />
+            <Button type="submit" data-testid="locked-password-submit">Unlock</Button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   if (status === "notfound" || status === "expired") {
     const expired = status === "expired";
     return (
@@ -1247,6 +1307,16 @@ export default function PastePage() {
                 data-testid="paste-toolbar-expiry-badge"
               >
                 <Clock className="h-3 w-3" /> {timeLeft}
+              </Badge>
+            )}
+
+            {burnAfterViews && (
+              <Badge
+                variant="outline"
+                className="rounded-full gap-1.5 font-mono text-xs text-orange-600 border-orange-500/40"
+                data-testid="paste-toolbar-burn-badge"
+              >
+                <Flame className="h-3 w-3" /> burns after {burnAfterViews} views
               </Badge>
             )}
 

@@ -312,3 +312,65 @@ def test_sheet_full_text_edit_persists(client):
     assert client.get(f"/api/paste/{slug}/sheets/{sid}").json()["content"] == "edited sheet"
     # main content untouched
     assert client.get(f"/api/paste/{slug}").json()["content"] == "x"
+
+
+# ---------------- v2.8.0: burn-after-read + password lock ----------------
+
+def test_burn_after_views_destroys_paste(client):
+    p = _create(client, content="secret", burnAfterViews=2)
+    slug = p["slug"]
+    # Two distinct viewers
+    r1 = client.get(f"/api/paste/{slug}?count_view=1&clientId=viewer-1")
+    assert r1.status_code == 200
+    r2 = client.get(f"/api/paste/{slug}?count_view=1&clientId=viewer-2")
+    assert r2.status_code == 200
+    # Third fetch: paste is gone
+    r3 = client.get(f"/api/paste/{slug}")
+    assert r3.status_code == 404
+
+
+def test_burn_after_views_repeat_viewer_does_not_trigger(client):
+    p = _create(client, content="secret", burnAfterViews=2)
+    slug = p["slug"]
+    assert client.get(f"/api/paste/{slug}?count_view=1&clientId=a").status_code == 200
+    # Same viewer again — still one unique burner, no burn yet
+    assert client.get(f"/api/paste/{slug}?count_view=1&clientId=a").status_code == 200
+    assert client.get(f"/api/paste/{slug}").status_code == 200
+
+
+def test_password_lock_rest(client):
+    p = _create(client, content="locked", password="hunter2")
+    slug = p["slug"]
+    assert p.get("passwordHash") is None  # hash never leaves the server
+    # Wrong / missing password → 401
+    assert client.get(f"/api/paste/{slug}").status_code == 401
+    assert client.get(f"/api/paste/{slug}?pw=wrong").status_code == 401
+    # Correct password → 200
+    ok = client.get(f"/api/paste/{slug}?pw=hunter2")
+    assert ok.status_code == 200 and ok.json()["content"] == "locked"
+    # Verify endpoint round-trip
+    v = client.post(f"/api/paste/{slug}/password", json={"password": "hunter2"}).json()
+    assert v == {"ok": True, "locked": True}
+
+
+def test_password_lock_websocket(client):
+    p = _create(client, content="locked-ws", password="pw123")
+    slug = p["slug"]
+    # No password → error + close 4401
+    with client.websocket_connect(f"/api/ws/{slug}") as ws:
+        msg = ws.receive_json()
+        assert msg["code"] == "password_required"
+    # Right password → init arrives
+    with client.websocket_connect(f"/api/ws/{slug}?pw=pw123") as ws:
+        msg = ws.receive_json()
+        assert msg["type"] == "init" and msg["paste"]["content"] == "locked-ws"
+
+
+def test_ws_init_does_not_leak_secrets(client):
+    p = _create(client, content="x", password="pw", burnAfterViews=3)
+    slug = p["slug"]
+    with client.websocket_connect(f"/api/ws/{slug}?pw=pw") as ws:
+        init = ws.receive_json()
+        assert "passwordHash" not in init["paste"]
+        assert "editToken" not in init["paste"]
+        assert init["burnAfterViews"] == 3
