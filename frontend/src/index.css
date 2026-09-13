@@ -113,6 +113,50 @@
   min-width: max-content;
 }
 
+/* ---------- Remote cursors (presence) ---------- */
+.lp-block-text {
+  position: relative;
+}
+
+.lp-remote-caret {
+  position: absolute;
+  width: 2px;
+  height: 20px;
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 5;
+  animation: lp-caret-blink 1.2s steps(1) infinite;
+}
+
+.lp-remote-caret-label {
+  position: absolute;
+  top: -14px;
+  left: -1px;
+  padding: 0 4px;
+  border-radius: 3px;
+  color: #fff;
+  font-size: 9px;
+  line-height: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.lp-remote-selection {
+  position: absolute;
+  height: 22.275px;
+  opacity: 0.22;
+  pointer-events: none;
+  z-index: 1;
+  border-radius: 2px;
+}
+
+@keyframes lp-caret-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
 .lp-editor-wrap textarea {
   outline: none !important;
   caret-color: hsl(var(--editor-caret));

@@ -43,6 +43,8 @@ import {
 import { ThemeToggle } from "@/components/ThemeToggle";
 import InlineBlocksEditor from "@/components/InlineBlocksEditor";
 import useCollab from "@/hooks/useCollab";
+import usePresence from "@/hooks/usePresence";
+import { getIdentity, setDisplayName } from "@/lib/identity";
 import {
   LANGUAGES,
   API_BASE,
@@ -392,6 +394,29 @@ export default function PastePage() {
     sheetRef: activeSheetRef,
   });
 
+  // ---- presence: live cursors + avatar bar (awareness) ----
+  const { peers, cursorsForSheet, sendCursor } = usePresence({
+    wsRef,
+    slug,
+    enabled: status !== "notfound" && status !== "expired",
+    connState,
+    canEdit,
+    sheetRef: activeSheetRef,
+  });
+  const [myName, setMyName] = useState(() => getIdentity().name);
+
+  // Idle heartbeat: keeps my cursor entry fresh on peers' screens while I'm
+  // present but not typing (server prunes after 30s of silence).
+  useEffect(() => {
+    if (!canEdit || status === "notfound" || status === "expired") return undefined;
+    const iv = setInterval(() => {
+      const ed = document.querySelector(".lp-blocks textarea");
+      const pos = ed ? ed.selectionStart ?? 0 : 0;
+      sendCursor(pos, pos);
+    }, 12000);
+    return () => clearInterval(iv);
+  }, [canEdit, status, sendCursor]);
+
   // Mirror remote CRDT changes into React state (text blocks re-render)
   const firstYRender = useRef(true);
   useEffect(() => {
@@ -495,6 +520,14 @@ export default function PastePage() {
       sheetYdocsRef.current.set(activeSheetRef.current, ydocRef.current);
       activeSheetRef.current = sheetId;
       setActiveSheet(sheetId);
+      // Re-announce which sheet I'm on so remote carets re-scope
+      try {
+        const me = getIdentity();
+        const wsP = wsRef.current;
+        if (wsP?.readyState === WebSocket.OPEN) {
+          wsP.send(JSON.stringify({ type: "hello", i: { clientId: me.clientId, name: me.name, color: me.color, initials: me.initials, sheetId } }));
+        }
+      } catch (e) { /* ignore */ }
 
       // Reuse cached doc or spin up a fresh one
       const cached = sheetYdocsRef.current.get(sheetId);
@@ -1031,6 +1064,35 @@ export default function PastePage() {
               <Users className="h-3 w-3" /> {viewers} online
             </Badge>
 
+            {/* Presence: my avatar + remote peers' avatars */}
+            <div className="flex items-center" data-testid="paste-presence-bar">
+              {[{ clientId: "me", name: myName, color: getIdentity().color, initials: getIdentity().initials, me: true }, ...peers].slice(0, 6).map((p, i, arr) => (
+                <button
+                  key={p.clientId}
+                  type="button"
+                  title={p.me ? `${p.name} (you) — click to rename` : p.name}
+                  onClick={p.me ? () => {
+                    // eslint-disable-next-line no-alert
+                    const next = window.prompt("Your display name", myName);
+                    if (next && next.trim()) {
+                      setDisplayName(next.trim());
+                      setMyName(next.trim());
+                    }
+                  } : undefined}
+                  className={`relative inline-flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-semibold text-white ring-2 ring-background ${i > 0 ? "-ml-2" : ""} hover:z-10 transition-transform hover:scale-110`}
+                  style={{ backgroundColor: p.color, zIndex: arr.length - i }}
+                  data-testid={`paste-presence-avatar-${p.clientId}`}
+                >
+                  {p.initials}
+                </button>
+              ))}
+              {peers.length > 5 && (
+                <span className="-ml-2 inline-flex h-7 items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground ring-2 ring-background" style={{ zIndex: 0 }}>
+                  +{peers.length - 5}
+                </span>
+              )}
+            </div>
+
             <span
               className="inline-flex items-center gap-1 text-xs text-muted-foreground font-mono"
               data-testid="paste-toolbar-total-view-count"
@@ -1167,6 +1229,8 @@ export default function PastePage() {
           onChange={applyContent}
           onDeleteImage={handleDeleteFile}
           onCopyImageUrl={handleCopyFileUrl}
+          remoteCursors={cursorsForSheet(activeSheet)}
+          onSelectionChange={sendCursor}
         />
 
         {/* History side panel */}

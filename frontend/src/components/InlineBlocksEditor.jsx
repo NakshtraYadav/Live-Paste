@@ -104,12 +104,57 @@ const lineCountOf = (block) => {
 };
 
 const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
-  { content, language, placeholder, onChange, onDeleteImage, onCopyImageUrl, readOnly },
+  { content, language, placeholder, onChange, onDeleteImage, onCopyImageUrl, readOnly, remoteCursors, onSelectionChange },
   ref,
 ) {
   const blocks = useMemo(() => parseBlocks(content), [content]);
   const rowRefs = useRef({});
   const focusRef = useRef(null); // { index, sel }
+
+  // ---- remote cursors: map plain-text offsets to (blockIndex, caretPos) ----
+  const cursorMap = useMemo(() => {
+    const map = {}; // blockIndex -> [{ name, color, caretPos, selStart, selEnd }]
+    if (!remoteCursors || !remoteCursors.length) return map;
+    // Char offsets of each block's first character in the joined content —
+    // mirrors blocksToContent(): files contribute their raw line, text blocks
+    // their value, null blocks nothing; blocks are joined with "\n".
+    const starts = [];
+    let acc = 0;
+    for (const b of blocks) {
+      starts.push(acc);
+      if (isFileBlock(b)) acc += (b.raw?.length || 0) + 1;
+      else if (b.value !== null) acc += b.value.length + 1;
+    }
+    const total = Math.max(acc - 1, 0);
+    for (const cur of remoteCursors) {
+      const head = Math.min(Math.max(cur.head, 0), total);
+      const anchor = Math.min(Math.max(cur.anchor, 0), total);
+      let bi = 0;
+      for (let i = 0; i < blocks.length; i += 1) {
+        if (head >= starts[i]) bi = i;
+        else break;
+      }
+      const pos = head - starts[bi];
+      const isText = !isFileBlock(blocks[bi]);
+      let ai = 0;
+      for (let i = 0; i < blocks.length; i += 1) {
+        if (anchor >= starts[i]) ai = i;
+        else break;
+      }
+      const aPos = anchor - starts[ai];
+      if (!map[bi]) map[bi] = [];
+      map[bi].push({
+        name: cur.name,
+        color: cur.color,
+        caretPos: isText ? pos : 0,
+        inNullZone: !isText,
+        selStart: ai === bi && aPos <= pos ? aPos : null,
+        selEnd: ai === bi && aPos <= pos ? pos : null,
+        selReverse: ai === bi && aPos > pos ? { start: pos, end: aPos } : null,
+      });
+    }
+    return map;
+  }, [remoteCursors, blocks]);
 
   const totalLines = useMemo(
     () => blocks.reduce((n, b) => n + lineCountOf(b), 0) || 1,
@@ -253,7 +298,19 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
 
   // ---- per-textarea handlers ----
   const trackSelection = (index) => (e) => {
-    focusRef.current = { index, sel: e.target.selectionStart ?? 0 };
+    const ta = e.target;
+    focusRef.current = { index, sel: ta.selectionStart ?? 0 };
+    if (onSelectionChange) {
+      // Report my absolute plain-text offset so peers can draw my caret
+      // (same accounting as blocksToContent: raw/value lengths + separators)
+      let offset = 0;
+      for (let i = 0; i < index; i += 1) {
+        const b = blocks[i];
+        if (isFileBlock(b)) offset += (b.raw?.length || 0) + 1;
+        else if (b.value !== null) offset += b.value.length + 1;
+      }
+      onSelectionChange(offset + (ta.selectionStart ?? 0), offset + (ta.selectionEnd ?? 0));
+    }
   };
 
   const handleKeyDown = (index) => (e) => {
@@ -302,10 +359,65 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
     commit(next);
   };
 
+  // ---- remote caret chip (name tag above a colored caret) ----
+  const caretChip = (cur, i) => (
+    <span
+      key={`${cur.name}-${i}`}
+      className="lp-remote-caret-label"
+      style={{ backgroundColor: cur.color }}
+    >
+      {cur.name}
+    </span>
+  );
+
+  // Map a plain-text offset inside `value` to (line, column) for positioning.
+  const lineStartsOf = (value) => {
+    const starts = [0];
+    for (let k = 0; k < value.length; k += 1) {
+      if (value[k] === "\n") starts.push(k + 1);
+    }
+    return starts;
+  };
+  const caretXY = (value, pos) => {
+    if (!value) return { line: 0, col: 0 };
+    const starts = lineStartsOf(value);
+    let li = 0;
+    for (let i = 0; i < starts.length; i += 1) {
+      if (pos >= starts[i]) li = i;
+      else break;
+    }
+    return { line: li, col: pos - starts[li] };
+  };
+
+  // ---- remote selection highlight strips for a text block ----
+  const selectionOverlays = (list, blockValue) =>
+    list.map((cur, i) => {
+      const s = cur.selReverse ? cur.selReverse.start : cur.selStart;
+      const e2 = cur.selReverse ? cur.selReverse.end : cur.selEnd;
+      if (s == null || e2 == null || s === e2 || !blockValue) return null;
+      const lineStarts = lineStartsOf(blockValue);
+      const strips = [];
+      for (let li = 0; li < lineStarts.length; li += 1) {
+        const ls = lineStarts[li];
+        const le = li + 1 < lineStarts.length ? lineStarts[li + 1] - 1 : blockValue.length;
+        const a = Math.max(s, ls);
+        const b = Math.min(e2, le);
+        if (b > a) strips.push({ top: li * 22.275, left: a - ls, width: b - a });
+      }
+      return strips.map((st, j) => (
+        <span
+          key={`${cur.name}-sel-${i}-${j}`}
+          className="lp-remote-selection"
+          style={{ backgroundColor: cur.color, top: st.top, left: st.left * 8.1, width: Math.max(st.width * 8.1, 4) }}
+        />
+      ));
+    });
+
   // ---- render: a file block as an image preview or a file card ----
   const renderFileBlock = (block, index, startLine) => {
     const previewAsImage =
       block.type === "image" || isImageName(block.name);
+    const fileCursors = cursorMap[index] || [];
 
     return (
       <div className="lp-block-row" key={`${block.type}-${block.id}-${index}`}>
@@ -317,6 +429,19 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
           <div>{startLine}</div>
         </div>
         <div className="lp-image-cell flex-1">
+          {fileCursors.map((cur, i) => (
+            <span
+              key={`fc-${cur.name}-${i}`}
+              className="lp-remote-caret"
+              style={{
+                backgroundColor: cur.color,
+                left: 20 + i * 2,
+                top: 6,
+              }}
+            >
+              {caretChip(cur, i)}
+            </span>
+          ))}
           {previewAsImage ? (
             <div
               className="lp-inline-image group"
@@ -496,6 +621,22 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
                 }
               }}
             >
+              {(cursorMap[index] || []).map((cur, i) =>
+                cur.inNullZone ? null : (
+                  <span
+                    key={`rc-${cur.name}-${i}`}
+                    className="lp-remote-caret"
+                    style={{
+                      backgroundColor: cur.color,
+                      top: caretXY(block.value, cur.caretPos).line * 22.275 + 6,
+                      left: 20 + caretXY(block.value, cur.caretPos).col * 8.1,
+                    }}
+                  >
+                    {caretChip(cur, i)}
+                  </span>
+                ),
+              )}
+              {selectionOverlays(cursorMap[index] || [], block.value)}
               <Editor
                 value={block.value}
                 onValueChange={readOnly ? undefined : handleBlockChange(index)}

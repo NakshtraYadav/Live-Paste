@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.2.0] - 2026-09
+
+### Added
+- **Live cursors + presence avatars (Google-Docs-style collaboration).** Everyone
+  in a paste room now sees who else is there: colored avatar chips in the toolbar
+  (click your own to rename), and remote carets with name tags rendered live in
+  the editor as peers type, plus remote selection highlights.
+  - Presence runs over the existing WebSocket protocol: a `hello` handshake
+    registers each participant, the server answers with the current peer list,
+    announces joins/leaves, and prunes stale entries; cursors are relayed
+    editor-to-editor with per-tab identities (random id, stable palette color,
+    display name persisted per browser).
+  - Cursor offsets are per-sheet, so remote carets re-scope when you switch
+    pages; read-only visitors can see presence but never broadcast cursors.
+  - Idle heartbeats keep your entry fresh while present but not typing;
+    stale cursors fade after 15s, stale presence after 30s.
+
+---
+
 ## [2.1.1] - 2026-09
 
 ### Fixed

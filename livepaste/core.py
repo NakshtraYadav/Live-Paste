@@ -555,11 +555,47 @@ async def delete_image(image_id: str):
 
 
 # ---------------- WebSocket room manager ----------------
+PEER_TIMEOUT_SECONDS = 30  # presence entries older than this are treated as gone
+
+
 class RoomManager:
     def __init__(self):
         self.rooms: Dict[str, Set[WebSocket]] = {}
         self.editors: Dict[str, Set[WebSocket]] = {}
         self.lock = asyncio.Lock()
+
+    # ---- presence registry (clientId -> {meta, ts}) per room ----
+    def peer_upsert(self, slug: str, ws: WebSocket, info: dict):
+        now = time.time()
+        cid = str(info.get("clientId") or "")
+        if not cid:
+            return
+        room = self._peer_room(slug)
+        entry = {
+            "clientId": cid,
+            "name": str(info.get("name") or "Guest")[:24],
+            "color": str(info.get("color") or "#f43f5e")[:9],
+            "initials": str(info.get("initials") or "?")[:2],
+            "sheetId": str(info.get("sheetId") or "main")[:24],
+            "ts": now,
+        }
+        room[cid] = entry
+
+    def _peer_room(self, slug: str) -> Dict[str, dict]:
+        if not hasattr(self, "_peers"):
+            self._peers = {}
+        return self._peers.setdefault(slug, {})
+
+    def peers_snapshot(self, slug: str) -> List[dict]:
+        room = self._peer_room(slug)
+        now = time.time()
+        return [v for v in room.values() if now - v["ts"] < PEER_TIMEOUT_SECONDS]
+
+    def peer_remove_ws(self, slug: str, ws: WebSocket):
+        cid = getattr(ws, "peerClientId", None)
+        room = self._peer_room(slug)
+        if cid and cid in room:
+            del room[cid]
 
     async def join(self, slug: str, ws: WebSocket, can_edit: bool):
         async with self.lock:
@@ -779,8 +815,54 @@ async def ws_paste(websocket: WebSocket, slug: str):
                 continue
 
             if mtype == "cursor":
-                # Awareness relay (selection color/name) — not persisted
-                await manager.broadcast(slug, {"type": "cursor", "c": msg.get("c")}, exclude=websocket)
+                # Live-cursor relay (editor only). The sender's identity rides
+                # along; each receiver overlays the caret at the given offset.
+                c = msg.get("c") or {}
+                websocket.peerClientId = str(c.get("clientId") or "")[:24]
+                manager.peer_upsert(
+                    slug,
+                    websocket,
+                    {
+                        "clientId": c.get("clientId"),
+                        "name": c.get("name"),
+                        "color": c.get("color"),
+                        "initials": c.get("initials"),
+                        "sheetId": c.get("sheetId"),
+                    },
+                )
+                await manager.broadcast(
+                    slug, {"type": "cursor", "c": c}, exclude=websocket
+                )
+                continue
+
+            if mtype == "hello":
+                # Presence handshake: register this peer, reply with everyone
+                # else in the room, then announce the newcomer.
+                info = msg.get("i") or {}
+                websocket.peerClientId = str(info.get("clientId") or "")[:24]
+                manager.peer_upsert(
+                    slug,
+                    websocket,
+                    {
+                        "clientId": info.get("clientId"),
+                        "name": info.get("name"),
+                        "color": info.get("color"),
+                        "initials": info.get("initials"),
+                        "sheetId": info.get("sheetId"),
+                    },
+                )
+                await websocket.send_text(
+                    json.dumps(
+                        {
+                            "type": "peers",
+                            "p": manager.peers_snapshot(slug),
+                            "viewers": manager.viewer_count(slug),
+                        }
+                    )
+                )
+                await manager.broadcast(
+                    slug, {"type": "peer-joined", "p": info}, exclude=websocket
+                )
                 continue
 
             if mtype == "edit":
@@ -821,8 +903,12 @@ async def ws_paste(websocket: WebSocket, slug: str):
     except Exception as e:
         logger.warning(f"WS error on {slug}: {e}")
     finally:
+        manager.peer_remove_ws(slug, websocket)
+        cid = getattr(websocket, "peerClientId", None)
         count, _ = await manager.leave(slug, websocket)
         await manager.broadcast(slug, {"type": "presence", "viewers": count})
+        if cid:
+            await manager.broadcast(slug, {"type": "peer-left", "clientId": cid})
 
 
 app.include_router(api_router)
