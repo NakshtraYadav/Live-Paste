@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.3.0] - 2026-09-14
+
+### Added
+- **Per-user edit permissions.** The paste owner no longer needs to share the
+  secret edit link to let someone in: click any peer's presence avatar to
+  **grant edit access** — their editor unlocks instantly, live, with a green
+  ✎ badge on the avatar. Click again to revoke; the change fans out to the
+  whole room over the existing WebSocket (`grant-edit`/`revoke-edit` →
+  `editors` broadcast), and revoked users are demoted to read-only on the
+  spot. The allowlist (up to 50 clientIds) persists server-side and is
+  re-applied on every reconnect — no link sharing needed.
+- The `init` message now carries `isOwner` and the current editors list so
+  the UI knows who may manage permissions.
+
+### Security
+- **Closed an enforcement gap**: file/image upload and file deletion were
+  only gated in the frontend — the REST endpoints accepted unauthenticated
+  writes. Uploads (`POST /file`, `/image`) and deletes (`DELETE /file/{id}`)
+  now require edit rights (edit token **or** granted clientId) server-side,
+  verified by new tests.
+
+### Tests
+- New regression tests for upload/delete authorization and the grant →
+  upload → revoke flow (31 total).
+
+---
+
 ## [3.2.0] - 2026-09-14
 
 ### Added
