@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.5.0] - 2026-09
+
+### Added
+- **Peer-to-peer LAN mode (y-webrtc).** A one-click "P2P" toggle in the paste
+  toolbar switches on browser-to-browser sync: document updates flow directly
+  over WebRTC data channels, while the LivePaste server only brokers the
+  initial handshake — data never touches the wire.
+  - Ships its own dumb signaling relay (`/api/webrtc/signaling`) that speaks the
+    y-webrtc wire protocol (subscribe/publish over topics, no third-party
+    signaling servers, signaling scoped to `lp:<slug>:<sheet>` topics).
+  - The provider attaches to the same Y.Doc the server CRDT sync uses, so P2P
+    and server sync run concurrently — Yjs merges idempotently; peers show in
+    the toggle badge (`2 peers`), with a `connecting` state meanwhile.
+  - Falls back gracefully: same-browser tabs also sync via BroadcastChannel,
+    and everything still syncs through the server when P2P is off.
+
+---
+
 ## [2.4.0] - 2026-09
 
 ### Added

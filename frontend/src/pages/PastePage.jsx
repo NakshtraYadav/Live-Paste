@@ -22,6 +22,7 @@ import {
   Eye as EyeIcon,
   X,
   CloudOff,
+  Network,
   RotateCcw,
   ArrowUpCircle,
   Share2,
@@ -45,6 +46,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import InlineBlocksEditor, { parseBlocks } from "@/components/InlineBlocksEditor";
 import useCollab from "@/hooks/useCollab";
 import usePresence from "@/hooks/usePresence";
+import useP2P from "@/hooks/useP2P";
 import { useOfflineDoc, useOnlineStatus, readOfflineDoc } from "@/hooks/useOfflineDoc";
 import { getIdentity, setDisplayName } from "@/lib/identity";
 import { runInSandbox, detectLanguageOf } from "@/lib/runner";
@@ -453,6 +455,33 @@ export default function PastePage() {
     enabled: status === "ready",
   });
   const online = useOnlineStatus();
+
+  // ---- P2P LAN mode: browser-to-browser sync over WebRTC (opt-in) ----
+  const [p2pEnabled, setP2pEnabled] = useState(() => {
+    try {
+      return localStorage.getItem("lp_p2p") === "1";
+    } catch (e) {
+      return false;
+    }
+  });
+  const { p2pPeers, p2pStatus } = useP2P({
+    slug,
+    ydocRef,
+    docVersion,
+    sheetRef: activeSheetRef,
+    enabled: p2pEnabled && status === "ready",
+  });
+  const toggleP2P = useCallback(() => {
+    setP2pEnabled((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem("lp_p2p", next ? "1" : "0");
+      } catch (e) {
+        /* private mode */
+      }
+      return next;
+    });
+  }, []);
 
   // When connectivity returns after being fully offline, retry the socket so
   // locally queued CRDT edits drain to the server. A slow periodic retry keeps
@@ -1233,6 +1262,31 @@ export default function PastePage() {
                 <CloudOff className="h-3 w-3" /> Offline — edits will sync
               </Badge>
             )}
+
+            <button
+              onClick={toggleP2P}
+              title={
+                p2pEnabled
+                  ? "P2P sync is ON — document data flows browser-to-browser, the server only brokers the handshake"
+                  : "Enable P2P sync — peers on your network exchange data directly, no server hop"
+              }
+              data-testid="paste-toolbar-p2p-toggle"
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                p2pEnabled
+                  ? "border-primary/40 bg-primary/10 text-primary"
+                  : "border-border bg-card text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Network className="h-3 w-3" />
+              <span className="hidden md:inline">P2P</span>
+              {p2pEnabled && (
+                <span className="font-mono" data-testid="paste-toolbar-p2p-status">
+                  {p2pStatus === "connected"
+                    ? `${p2pPeers} peer${p2pPeers === 1 ? "" : "s"}`
+                    : p2pStatus}
+                </span>
+              )}
+            </button>
 
             <ThemeToggle testId="paste-toolbar-theme-toggle" />
           </div>

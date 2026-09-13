@@ -911,6 +911,78 @@ async def ws_paste(websocket: WebSocket, slug: str):
             await manager.broadcast(slug, {"type": "peer-left", "clientId": cid})
 
 
+# ---------------- P2P LAN mode: y-webrtc signaling relay (v2.5.0) ----------------
+#
+# The signaling server is deliberately DUMB — it never touches document data.
+# It only forwards y-webrtc's signaling envelopes between browsers that
+# subscribed to the same topic ("lp:<slug>:<sheet>"), so peers can exchange
+# SDP offers/answers and ICE candidates. After that, document sync flows
+# DIRECTLY browser-to-browser over WebRTC data channels; the server is
+# out of the data path entirely.
+
+signaling_rooms: Dict[str, Set[WebSocket]] = {}
+
+
+# NOTE: deliberately NOT /api/ws/signaling — that path would be shadowed by
+# the /api/ws/{slug} paste route registered above it.
+@app.websocket("/api/webrtc/signaling")
+async def ws_signaling(websocket: WebSocket):
+    """y-webrtc-compatible signaling relay: subscribe/publish over topics."""
+    await websocket.accept()
+    topics: Set[str] = set()
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                msg = json.loads(raw)
+            except (ValueError, TypeError):
+                continue
+            mtype = msg.get("type")
+            if mtype == "subscribe":
+                new_topics = msg.get("topics")
+                if isinstance(new_topics, list):
+                    for t in new_topics:
+                        if isinstance(t, str) and t.startswith("lp:"):
+                            topics.add(t)
+                            signaling_rooms.setdefault(t, set()).add(websocket)
+            elif mtype == "publish":
+                topic = msg.get("topic")
+                if (
+                    isinstance(topic, str)
+                    and topic in topics
+                    and topic.startswith("lp:")
+                    and isinstance(msg.get("data"), dict)
+                ):
+                    data = msg["data"]
+                    # add from= so receivers can ignore their own echo
+                    payload = {"type": "publish", "topic": topic, "data": {**data}}
+                    if isinstance(data.get("from"), str):
+                        payload["data"]["from"] = data["from"]
+                    else:
+                        payload["data"]["from"] = id(websocket)
+                    dead = []
+                    for peer in signaling_rooms.get(topic, set()):
+                        if peer is websocket:
+                            continue  # client filters self-echo via data.from
+                        try:
+                            await peer.send_text(json.dumps(payload))
+                        except Exception:
+                            dead.append(peer)
+                    for peer in dead:
+                        signaling_rooms.get(topic, set()).discard(peer)
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.warning(f"signaling WS error: {e}")
+    finally:
+        for t in topics:
+            room = signaling_rooms.get(t)
+            if room:
+                room.discard(websocket)
+                if not room:
+                    signaling_rooms.pop(t, None)
+
+
 app.include_router(api_router)
 
 app.add_middleware(
