@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.1.0] - 2026-09
+
+### Added
+- **Floating emoji reactions.** A smiley button in the toolbar opens an emoji
+  bar (🎉 ❤️ 😂 🔥 👍 👀 🚀 ✨); picked reactions drift up the editor as
+  bubbles tagged with the sender's name and presence color — pure Google-Docs
+  delight, relayed through the existing WebSocket to everyone in the room.
+
+---
+
 ## [3.0.0] - 2026-09
 
 ### Added

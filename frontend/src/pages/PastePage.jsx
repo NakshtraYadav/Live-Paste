@@ -24,6 +24,7 @@ import {
   CloudOff,
   Network,
   Mic,
+  Smile,
   QrCode,
   Flame,
   MonitorUp,
@@ -83,6 +84,8 @@ export default function PastePage() {
   const [status, setStatus] = useState("loading"); // loading | ready | notfound | expired | locked
   const [burnAfterViews, setBurnAfterViews] = useState(null);
   const [showQr, setShowQr] = useState(false);
+  const [reactions, setReactions] = useState([]); // {id, emoji, name, color, x}
+  const [showReactionBar, setShowReactionBar] = useState(false);
   const [content, setContent] = useState("");
   const [language, setLanguage] = useState("plaintext");
   const [viewers, setViewers] = useState(1);
@@ -360,6 +363,9 @@ export default function PastePage() {
         case "presence":
           setViewers(msg.viewers || 1);
           break;
+        case "reaction":
+          if (msg.r) spawnReaction(msg.r);
+          break;
         case "error":
           if (msg.code === "not_found") {
             closedRef.current = true;
@@ -478,7 +484,27 @@ export default function PastePage() {
   });
   const online = useOnlineStatus();
 
-  // ---- P2P LAN mode: browser-to-browser sync over WebRTC (opt-in) ----
+  // ---- floating emoji reactions (v3.1.0) ----
+  const spawnReaction = useCallback((data) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setReactions((list) => [...list.slice(-14), { id, ...data }]);
+    setTimeout(() => {
+      setReactions((list) => list.filter((r) => r.id !== id));
+    }, 3200);
+  }, []);
+
+  const sendReaction = useCallback(
+    (emoji) => {
+      const me = getIdentity();
+      const payload = { emoji, name: me.name, color: me.color, x: 0.35 + Math.random() * 0.3 };
+      spawnReaction(payload); // show my own bubble immediately
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN && canEdit) {
+        ws.send(JSON.stringify({ type: "reaction", r: payload }));
+      }
+    },
+    [canEdit, spawnReaction],
+  );
   const [p2pEnabled, setP2pEnabled] = useState(() => {
     try {
       return localStorage.getItem("lp_p2p") === "1";
@@ -1333,6 +1359,39 @@ export default function PastePage() {
               </Badge>
             )}
 
+            {canEdit && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowReactionBar((v) => !v)}
+                  data-testid="paste-reaction-button"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                  title="React with an emoji — everyone sees it float up"
+                >
+                  <Smile className="h-3 w-3" />
+                </button>
+                {showReactionBar && (
+                  <div
+                    className="absolute right-0 top-full mt-1 z-50 flex items-center gap-0.5 rounded-full border border-border bg-popular bg-popover p-1 shadow-lg"
+                    data-testid="paste-reaction-bar"
+                  >
+                    {["🎉", "❤️", "😂", "🔥", "👍", "👀", "🚀", "✨"].map((emo) => (
+                      <button
+                        key={emo}
+                        onClick={() => {
+                          sendReaction(emo);
+                          setShowReactionBar(false);
+                        }}
+                        className="rounded-full px-1.5 py-0.5 text-lg leading-none hover:bg-accent transition-transform hover:scale-125"
+                        data-testid={`paste-reaction-emoji`}
+                      >
+                        {emo}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {showQr && (
               <div
                 className="flex flex-col items-center gap-1 rounded-lg border border-border bg-card p-2 shadow-sm"
@@ -1534,6 +1593,25 @@ export default function PastePage() {
         onDrop={canEdit ? handleDrop : undefined}
         onPaste={canEdit ? handlePaste : undefined}
       >
+        {/* Floating emoji reactions (v3.1.0) */}
+        <div className="pointer-events-none absolute inset-0 z-40 overflow-hidden" data-testid="paste-reaction-layer">
+          {reactions.map((r) => (
+            <div
+              key={r.id}
+              className="lp-reaction-float absolute"
+              style={{ left: `${Math.round(r.x * 100)}%` }}
+            >
+              <span className="lp-reaction-emoji">{r.emoji}</span>
+              <span
+                className="lp-reaction-name"
+                style={{ backgroundColor: r.color }}
+              >
+                {r.name}
+              </span>
+            </div>
+          ))}
+        </div>
+
         {!canEdit && (
           <div
             className="absolute top-2 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground shadow-sm"

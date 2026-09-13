@@ -919,6 +919,34 @@ async def ws_paste(websocket: WebSocket, slug: str):
                 )
                 continue
 
+            if mtype == "reaction":
+                # Floating emoji reactions (v3.1.0): pure relay, editor-only.
+                # The emoji + sender identity fan out to the whole room; every
+                # client renders the bubble drifting up its own editor.
+                r = msg.get("r") or {}
+                if not can_edit:
+                    await websocket.send_text(
+                        json.dumps({"type": "error", "code": "read_only", "message": "This link is read-only"})
+                    )
+                    continue
+                emoji = str(r.get("emoji") or "")[:8]
+                if not emoji:
+                    continue
+                await manager.broadcast(
+                    slug,
+                    {
+                        "type": "reaction",
+                        "r": {
+                            "emoji": emoji,
+                            "name": str(r.get("name") or "Guest")[:24],
+                            "color": str(r.get("color") or "#35d0a5")[:16],
+                            "x": max(0.0, min(1.0, float(r.get("x") or 0.5))),
+                        },
+                    },
+                    exclude=websocket,
+                )
+                continue
+
             if mtype == "hello":
                 # Presence handshake: register this peer, reply with everyone
                 # else in the room, then announce the newcomer.
