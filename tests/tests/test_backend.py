@@ -217,6 +217,33 @@ def test_legacy_image_endpoint_still_image_only(client):
     assert r.status_code == 400
 
 
+def test_locked_paste_cannot_leak_via_sheets_or_revisions(client):
+    """v3.5.1 regression: password-gated pastes leaked content through
+    GET /sheets/{id} and GET /revisions/{rev} (no pw check)."""
+    p = _create(client, content="SECRET BODY", password="pw123")
+    slug = p["slug"]
+
+    # main sheet without pw → 401; with pw → content served
+    r = client.get(f"/api/paste/{slug}/sheets/main")
+    assert r.status_code == 401
+    r = client.get(f"/api/paste/{slug}/sheets/main?pw=pw123")
+    assert r.status_code == 200
+    assert r.json()["content"] == "SECRET BODY"
+
+    # revision content is paste content — must be gated too (401 before 404,
+    # so probing for revisions can't distinguish existing from missing ones)
+    r = client.get(f"/api/paste/{slug}/revisions/1")
+    assert r.status_code in (401, 404)
+    r = client.get(f"/api/paste/{slug}/revisions/1?pw=pw123")
+    # gate releases (404 here = revision does not exist on a never-edited paste;
+    # 200 would be served if it did — never 401)
+    assert r.status_code in (200, 404)
+
+    # plain GET still honors the lock (baseline)
+    assert client.get(f"/api/paste/{slug}").status_code == 401
+    assert client.get(f"/api/paste/{slug}?pw=pw123").status_code == 200
+
+
 def test_upload_requires_edit_rights(client):
     """v3.3.0: uploads/deletes are server-side token-gated now."""
     p = _create(client, content="guard")

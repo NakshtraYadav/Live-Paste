@@ -225,7 +225,7 @@ export default function PastePage() {
       setConnState("connected");
     };
 
-    ws.onmessage = async (event) => {
+    ws.onmessage = (event) => {
       let msg;
       try {
         msg = JSON.parse(event.data);
@@ -393,10 +393,13 @@ export default function PastePage() {
             closedRef.current = true;
             // v3.4.0: distinguish "server restarted in ephemeral mode and
             // wiped the paste" from a genuinely dead link — if the browser
-            // holds an offline copy, offer to restore it.
-            const haveLocal = await hasOfflineDoc(slug, "main");
+            // holds an offline copy, offer to restore it. (Fire-and-forget:
+            // the message handler stays synchronous so messages are never
+            // processed out of order.)
             setStatus("notfound");
-            if (haveLocal) setLocalCopyAvailable(true);
+            hasOfflineDoc(slug, "main").then((have) => {
+              if (have) setLocalCopyAvailable(true);
+            });
           } else if (msg.code === "expired") {
             closedRef.current = true;
             setStatus("expired");
@@ -695,9 +698,17 @@ export default function PastePage() {
   // ---- send edits over WS (CRDT deltas; full-text as periodic backup) ----
   // The backup full-text channel is sheet-scoped: `edit` only ever refers to the
   // main sheet, other sheets go through `s:edit` so main is never clobbered.
+  // v3.5.1 (bug): the full-text backup also fires per keystroke; on the server
+  // each one appended a revision, so a 200-word burst produced ~50 identical
+  // snapshots and evicted real history (cap is 50). The backup is now throttled
+  // to at most one full-text sync per 5s — CRDT deltas still flow per keystroke.
+  const lastFullSyncRef = useRef(0);
   const sendEdit = useCallback(() => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const now = Date.now();
+    if (now - lastFullSyncRef.current < 5000) return;
+    lastFullSyncRef.current = now;
     if (activeSheetRef.current === "main") {
       ws.send(JSON.stringify({ type: "edit", content: contentRef.current }));
     } else {
@@ -798,7 +809,11 @@ export default function PastePage() {
       setDocVersion((v) => v + 1); // ytext memo follows the swapped doc
 
       try {
-        const res = await axios.get(`${API_BASE}/api/paste/${slug}/sheets/${sheetId}`);
+        // v3.5.1: locked pastes must send the session password on every read
+        const pwQ = lockedPastePasswords.current[slug]
+          ? `?pw=${encodeURIComponent(lockedPastePasswords.current[slug])}`
+          : "";
+        const res = await axios.get(`${API_BASE}/api/paste/${slug}/sheets/${sheetId}${pwQ}`);
         setLanguage(res.data.language || "plaintext");
         const c = res.data.content || "";
         setContent(c);
@@ -1059,7 +1074,10 @@ export default function PastePage() {
 
   const handleRestoreRevision = async (rev) => {
     try {
-      const res = await axios.get(`${API_BASE}/api/paste/${slug}/revisions/${rev}`);
+      const pwQ = lockedPastePasswords.current[slug]
+        ? `?pw=${encodeURIComponent(lockedPastePasswords.current[slug])}`
+        : "";
+      const res = await axios.get(`${API_BASE}/api/paste/${slug}/revisions/${rev}${pwQ}`);
       const restored = res.data.content;
       await axios.post(`${API_BASE}/api/paste/${slug}/restore`, {
         editToken,

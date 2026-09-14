@@ -153,7 +153,7 @@ def _pw_clear(ip: str, slug: str) -> None:
 
 
 def ws_client_ip(websocket) -> str:
-    fwd = websocket.headers.get("x-forwarded-for") if hasattr(websocket, "headers") else None
+    fwd = websocket.headers.get("x-forwarded-for") if _TRUST_PROXY and hasattr(websocket, "headers") else None
     if fwd:
         return fwd.split(",")[0].strip()
     client = getattr(websocket, "client", None)
@@ -258,8 +258,15 @@ class RateLimiter:
 limiter = RateLimiter()
 
 
+# v3.5.1 (security): X-Forwarded-For is client-controllable. Trusting it by
+# default let any caller rotate their apparent IP (defeating rate limits and
+# brute-force lockouts). Only honor it behind a trusted proxy, opted in via
+# LIVEPASTE_TRUST_PROXY=1 (a reverse proxy that OVERWRITES the header).
+_TRUST_PROXY = os.environ.get("LIVEPASTE_TRUST_PROXY", "") in ("1", "true", "yes")
+
+
 def client_ip(request: Request) -> str:
-    fwd = request.headers.get("x-forwarded-for")
+    fwd = request.headers.get("x-forwarded-for") if _TRUST_PROXY else None
     if fwd:
         return fwd.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
@@ -559,10 +566,16 @@ async def list_sheets(slug: str):
 
 
 @api_router.get("/paste/{slug}/sheets/{sheet_id}")
-async def get_sheet(slug: str, sheet_id: str):
+async def get_sheet(slug: str, sheet_id: str, pw: str = ""):
     paste = await get_paste_doc(slug)
     if not paste:
         raise HTTPException(status_code=404, detail="Paste not found or expired")
+    # v3.5.1 (security): locked pastes must authenticate on EVERY read path,
+    # not just GET /paste/{slug} — this endpoint previously leaked sheet
+    # content to anyone with the URL while the paste page showed a lock.
+    pw_hash = paste.get("passwordHash")
+    if pw_hash and not check_password(pw, pw_hash):
+        raise HTTPException(status_code=401, detail="Password required")
     if sheet_id == "main":
         return {"sheetId": "main", "name": "Page 1", "content": paste["content"], "language": paste["language"], "position": 0}
     sheet = await storage.get_sheet(slug, sheet_id)
@@ -655,10 +668,15 @@ async def list_revisions(slug: str):
 
 
 @api_router.get("/paste/{slug}/revisions/{rev}")
-async def get_revision(slug: str, rev: int):
+async def get_revision(slug: str, rev: int, pw: str = ""):
     paste = await get_paste_doc(slug)
     if not paste:
         raise HTTPException(status_code=404, detail="Paste not found or expired")
+    # v3.5.1 (security): same gate as sheets — revision content is paste
+    # content and must not be readable around the lock screen.
+    pw_hash = paste.get("passwordHash")
+    if pw_hash and not check_password(pw, pw_hash):
+        raise HTTPException(status_code=401, detail="Password required")
     r = await storage.get_revision(slug, rev)
     if not r:
         raise HTTPException(status_code=404, detail="Revision not found")
@@ -1360,6 +1378,32 @@ async def ws_signaling(websocket: WebSocket):
 
 
 app.include_router(api_router)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """Baseline hardening headers on every response (v3.5.1).
+
+    - X-Content-Type-Options: nosniff (defense in depth; file responses set it too)
+    - Referrer-Policy: pastes often hold private URLs; don't leak them via Referer
+    - X-Frame-Options / frame-ancestors: block clickjacking of the editor & lock screen
+    - CSP: same-origin assets + the Pyodide CDN worker blob (v2.3.0 runnable pastes)
+    """
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "script-src 'self' https://cdn.jsdelivr.net; "
+        "worker-src 'self' blob:; connect-src 'self' wss: ws: https://cdn.jsdelivr.net; "
+        "frame-ancestors 'self'",
+    )
+    return response
+
 
 app.add_middleware(
     CORSMiddleware,

@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.5.1] - 2026-09-14
+
+### Security
+Full professional audit — see **AUDIT.md** for the complete report.
+- **CRITICAL — password-lock bypass closed.** `GET /paste/{slug}/sheets/{id}`
+  and `GET /paste/{slug}/revisions/{rev}` served full paste content without
+  the view password — unauthenticated read paths existed around the lock
+  screen. Both endpoints now enforce the same gate (regression test
+  included; frontend sends the session password on those fetches).
+- **`X-Forwarded-For` spoofing defeated rate limits and brute-force
+  lockout.** The header is now only trusted behind an explicitly configured
+  reverse proxy (`LIVEPASTE_TRUST_PROXY=1`); rate limiting keys on the real
+  socket address by default.
+- **Security headers** on every response: `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options:
+  SAMEORIGIN` (anti-clickjacking), and a baseline `Content-Security-Policy`.
+
+### Fixed
+- **`livepaste restart` could boot a stale version** (observed: v2.1.1 while
+  the checkout held v3.4.0) — a macOS framework-Python bytecode cache keyed
+  by absolute source path served dead code, and a stale `build/lib` tree in
+  the repo could leak into pip installs. Cache and artifacts purged; restart
+  now launches uvicorn with `cwd`/`PYTHONPATH` pinned to the running checkout
+  (deterministic imports).
+- **Revision history was destroyed by normal typing.** Every keystroke's
+  full-text backup sync appended a revision, filling the 50-slot history
+  with near-identical snapshots and evicting real ones. The backup channel
+  is throttled to one sync per 5 s (CRDT deltas — the actual sync path —
+  still flow per keystroke); identical consecutive snapshots are skipped
+  server-side.
+- **`livepaste restart` no longer kills a recycled pid** (a stale pid file
+  could point at an unrelated process — now verified via `ps` first).
+- **`--port` now beats a stale `PORT` config value** for restart.
+- **WebSocket message handler is synchronous again** — an `async` handler
+  could reorder presence/CRDT/error messages after any future await.
+
+### Added
+- `AUDIT.md` — the full audit: findings by severity, data-flow traces,
+  clean-bill items, and follow-up recommendations.
+- Regression test for the lock-bypass fix (32 tests total).
+
+---
+
+## [3.5.0] - 2026-09-14
+
+### Added
+- **Tag-based rollback with version summaries.** `livepaste rollback --list`
+  shows recent GitHub releases (tag, date, one-line summary from release
+  notes) merged with a local ledger of versions actually installed on this
+  machine; `livepaste rollback v3.3.0` downloads, SHA256-verifies, and
+  installs that exact tag. The classic instant `.old` rollback is unchanged.
+- **Version ledger** (`~/.livepaste/history.json`) — every update, rollback
+  and install is recorded with version, action, summary and timestamp.
+- **`livepaste restart`** — stops the running server (pid file + port probe,
+  pid-reuse guarded) and relaunches it detached on the same port/data dir,
+  waiting for `/api/health` to answer. Staged updates and rollbacks are
+  applied automatically on restart; `livepaste start` also applies any
+  pending staged change instead of asking for a manual restart.
+- Release-asset fetching by tag (`releases/download/<tag>/…`), so rollback
+  and update share one verified download path.
+
+---
+
 ## [3.4.0] - 2026-09-14
 
 ### Fixed
