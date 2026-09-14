@@ -17,7 +17,7 @@ import { WebrtcProvider } from "y-webrtc";
  * `docVersion` must bump whenever the Y.Doc instance is swapped (paste load /
  * sheet switch) so a new provider is created for the right doc.
  */
-export default function useP2P({ slug, ydocRef, docVersion = 0, sheetRef, enabled }) {
+export default function useP2P({ slug, ydocRef, docVersion = 0, sheetId = "main", enabled }) {
   const providerRef = useRef(null);
   const [p2pPeers, setP2pPeers] = useState(0);
   const [p2pStatus, setP2pStatus] = useState("off"); // off | connecting | connected
@@ -29,7 +29,11 @@ export default function useP2P({ slug, ydocRef, docVersion = 0, sheetRef, enable
       return undefined;
     }
     const doc = ydocRef.current;
-    const sid = sheetRef ? sheetRef.current : "main";
+    const sid = sheetId || "main";
+    // v3.4.0: the provider now FOLLOWS the active sheet — the topic changes
+    // with it (sheetId is a real dependency), so peers only sync the page
+    // they are actually on, and switching pages re-attaches the data channel
+    // to the new Y.Doc.
     const provider = new WebrtcProvider(`lp:${slug}:${sid}`, doc, {
       // Our own relay — localhost/LAN first, no third-party signaling servers.
       // If the relay is unreachable, peers on the same page can still discover
@@ -62,7 +66,7 @@ export default function useP2P({ slug, ydocRef, docVersion = 0, sheetRef, enable
       setP2pPeers(0);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug, ydocRef, docVersion, enabled]);
+  }, [slug, sheetId, ydocRef, docVersion, enabled]);
 
   return { p2pPeers, p2pStatus };
 }

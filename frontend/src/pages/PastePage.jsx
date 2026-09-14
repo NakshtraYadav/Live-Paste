@@ -32,6 +32,12 @@ import {
   RotateCcw,
   ArrowUpCircle,
   Share2,
+  GitFork,
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  Globe,
+  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -50,10 +56,22 @@ import {
 } from "@/components/ui/select";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import InlineBlocksEditor, { parseBlocks } from "@/components/InlineBlocksEditor";
+import MarkdownView from "@/components/MarkdownView";
+import DiffView from "@/components/DiffView";
+import {
+  Command,
+  CommandDialog,
+  CommandInput,
+  CommandList,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+  CommandShortcut,
+} from "@/components/ui/command";
 import useCollab from "@/hooks/useCollab";
 import usePresence from "@/hooks/usePresence";
 import useP2P from "@/hooks/useP2P";
-import { useOfflineDoc, useOnlineStatus, readOfflineDoc } from "@/hooks/useOfflineDoc";
+import { useOfflineDoc, useOnlineStatus, readOfflineDoc, hasOfflineDoc } from "@/hooks/useOfflineDoc";
 import { getIdentity, setDisplayName } from "@/lib/identity";
 import { runInSandbox, detectLanguageOf } from "@/lib/runner";
 import {
@@ -94,6 +112,7 @@ export default function PastePage() {
   const [timeLeft, setTimeLeft] = useState(null);
   const [connState, setConnState] = useState("connecting"); // connecting | connected | reconnecting | disconnected
   const [copiedLink, setCopiedLink] = useState(false);
+  const [forking, setForking] = useState(false); // v3.7.0
   const [copiedContent, setCopiedContent] = useState(false);
   const [copiedEdit, setCopiedEdit] = useState(false);
   const [uploadPct, setUploadPct] = useState(null); // null = not uploading
@@ -104,8 +123,20 @@ export default function PastePage() {
   const [renamingSheet, setRenamingSheet] = useState(null); // sheetId being renamed
   const [renameValue, setRenameValue] = useState("");
   const [canEdit, setCanEdit] = useState(false);
+  const [isOwner, setIsOwner] = useState(false);
+  const [editors, setEditors] = useState([]); // clientIds granted edit permission
+  const [localCopyAvailable, setLocalCopyAvailable] = useState(false); // server wiped, we have an offline copy
   const [editToken, setEditToken] = useState("");
   const [showHistory, setShowHistory] = useState(false);
+  const [mdPreview, setMdPreview] = useState(false); // v3.10.0 markdown preview toggle
+  const [htmlPreview, setHtmlPreview] = useState(false); // v3.11.0 sandboxed HTML preview
+  const [diffRev, setDiffRev] = useState(null); // v3.12.0 revision being diffed
+  const [diffData, setDiffData] = useState(null); // { oldText, newText }
+  const [showFind, setShowFind] = useState(false); // v3.13.0 find & replace
+  const [findText, setFindText] = useState("");
+  const [replaceText, setReplaceText] = useState("");
+  const [findCase, setFindCase] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false); // v3.14.0 command palette
   const [revisions, setRevisions] = useState(null); // null = not loaded
   const [docVersion, setDocVersion] = useState(0); // bump when the Y.Doc instance is swapped
   const [revLoading, setRevLoading] = useState(false);
@@ -234,6 +265,8 @@ export default function PastePage() {
           gotInitRef.current = true;
           if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
           setCanEdit(!!msg.canEdit);
+          setIsOwner(!!msg.isOwner);
+          setEditors(Array.isArray(msg.editors) ? msg.editors : []);
           setBurnAfterViews(msg.burnAfterViews || null);
           {
             const c = msg.paste.content || "";
@@ -279,10 +312,15 @@ export default function PastePage() {
             contentRef.current = merged;
             applyingRemoteRef.current = false;
           } else {
-            // No stored CRDT state — this is a fresh sheet: seed from REST content
+            // No stored CRDT state — this is a fresh sheet. Seed ONLY when the
+            // REST text is actually non-empty (a brand-new page must start
+            // blank, never inherit the previous page) and the user hasn't
+            // started typing while the answer was in flight (a stale s:state
+            // must not clobber fresh local edits).
             const ytext = ydocRef.current.getText("content");
-            if (ytext.length === 0 && contentRef.current) {
-              ydocRef.current.transact(() => ytext.insert(0, contentRef.current));
+            const rest = contentRef.current || "";
+            if (ytext.length === 0 && rest.length > 0) {
+              ydocRef.current.transact(() => ytext.insert(0, rest));
             }
           }
           break;
@@ -363,19 +401,43 @@ export default function PastePage() {
         case "presence":
           setViewers(msg.viewers || 1);
           break;
+        case "editors": {
+          // v3.3.0: my edit rights may have changed live (grant/revoke).
+          setEditors(Array.isArray(msg.editors) ? msg.editors : []);
+          if (msg.granted && msg.changed === getIdentity().clientId) {
+            setCanEdit(true);
+            toast.success("You were granted edit access ✏️");
+          } else if (!msg.granted && msg.changed === getIdentity().clientId) {
+            setCanEdit(false);
+            toast.info("Your edit access was revoked");
+          }
+          break;
+        }
         case "reaction":
           if (msg.r) spawnReaction(msg.r);
           break;
         case "error":
           if (msg.code === "not_found") {
             closedRef.current = true;
+            // v3.4.0: distinguish "server restarted in ephemeral mode and
+            // wiped the paste" from a genuinely dead link — if the browser
+            // holds an offline copy, offer to restore it. (Fire-and-forget:
+            // the message handler stays synchronous so messages are never
+            // processed out of order.)
             setStatus("notfound");
+            hasOfflineDoc(slug, "main").then((have) => {
+              if (have) setLocalCopyAvailable(true);
+            });
           } else if (msg.code === "expired") {
             closedRef.current = true;
             setStatus("expired");
           } else if (msg.code === "password_required") {
             closedRef.current = true;
             setStatus("locked");
+          } else if (msg.code === "too_many_attempts") {
+            closedRef.current = true;
+            setStatus("locked");
+            toast.error(msg.message || "Too many attempts — try again in a few minutes");
           } else if (msg.code === "too_large") {
             toast.error(msg.message || "Content too large");
           } else if (msg.code === "read_only") {
@@ -540,7 +602,7 @@ export default function PastePage() {
     slug,
     ydocRef,
     docVersion,
-    sheetRef: activeSheetRef,
+    sheetId: activeSheet, // v3.4.0: re-attach the data channel on page switch
     enabled: p2pEnabled && status === "ready",
   });
   const toggleP2P = useCallback(() => {
@@ -558,10 +620,24 @@ export default function PastePage() {
   // ---- voice & screen notes: record → upload as a regular paste file ----
   const recorder = useRecorder({
     onComplete: async (blob, label) => {
-      const ext = blob.type.includes("webm") ? "webm" : blob.type.includes("mp4") ? "m4a" : "bin";
+      const ext = blob.type.includes("webm")
+        ? "webm"
+        : blob.type.includes("mp4")
+          ? "m4a"
+          : blob.type.includes("ogg")
+            ? "ogg"
+            : "bin";
       await uploadFile(new File([blob], `${label}-${Date.now()}.${ext}`, { type: blob.type }));
     },
   });
+  const handleRecord = useCallback(
+    async (kind) => {
+      const res = await recorder.start(kind);
+      if (res === "denied") toast.error("Microphone/screen access was denied — check browser permissions");
+      else if (res === "unsupported") toast.error("Recording isn't supported in this browser");
+    },
+    [recorder],
+  );
 
   // When connectivity returns after being fully offline, retry the socket so
   // locally queued CRDT edits drain to the server. A slow periodic retry keeps
@@ -650,9 +726,17 @@ export default function PastePage() {
   // ---- send edits over WS (CRDT deltas; full-text as periodic backup) ----
   // The backup full-text channel is sheet-scoped: `edit` only ever refers to the
   // main sheet, other sheets go through `s:edit` so main is never clobbered.
+  // v3.5.1 (bug): the full-text backup also fires per keystroke; on the server
+  // each one appended a revision, so a 200-word burst produced ~50 identical
+  // snapshots and evicted real history (cap is 50). The backup is now throttled
+  // to at most one full-text sync per 5s — CRDT deltas still flow per keystroke.
+  const lastFullSyncRef = useRef(0);
   const sendEdit = useCallback(() => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const now = Date.now();
+    if (now - lastFullSyncRef.current < 5000) return;
+    lastFullSyncRef.current = now;
     if (activeSheetRef.current === "main") {
       ws.send(JSON.stringify({ type: "edit", content: contentRef.current }));
     } else {
@@ -699,6 +783,52 @@ export default function PastePage() {
     [sendEdit, ytext, ydocRef, replaceYText],
   );
 
+  // v3.13.0 — find & replace over the whole paste content.
+  const matchCount = useMemo(() => {
+    if (!findText) return 0;
+    try {
+      const hay = findCase ? content : content.toLowerCase();
+      const needle = findCase ? findText : findText.toLowerCase();
+      let count = 0;
+      let pos = hay.indexOf(needle);
+      while (pos !== -1) {
+        count += 1;
+        pos = hay.indexOf(needle, pos + needle.length || 1);
+      }
+      return count;
+    } catch {
+      return 0;
+    }
+  }, [content, findText, findCase]);
+
+  const handleReplaceAll = useCallback(() => {
+    if (!findText || !canEdit) return;
+    const flags = findCase ? "g" : "gi";
+    const escaped = findText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(escaped, flags);
+    const next = content.replace(re, replaceText);
+    if (next !== content) {
+      applyContent(next);
+      toast.success(`Replaced ${matchCount} occurrence${matchCount === 1 ? "" : "s"}`);
+    }
+  }, [findText, replaceText, findCase, content, canEdit, applyContent, matchCount]);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "h") {
+        e.preventDefault();
+        setShowFind((v) => !v);
+      }
+      if ((e.metaKey || e.ctrlKey) && (e.key.toLowerCase() === "k" || e.key.toLowerCase() === "p")) {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+      if (e.key === "Escape") setShowFind(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // ---- sheets (pages) ----
   const refreshSheets = useCallback(async () => {
     try {
@@ -728,6 +858,13 @@ export default function PastePage() {
       sheetYdocsRef.current.set(activeSheetRef.current, ydocRef.current);
       activeSheetRef.current = sheetId;
       setActiveSheet(sheetId);
+      // v3.4.0 (bug: new pages inherited the previous page's text): reset the
+      // content refs BEFORE any await. Swapping the doc bumps docVersion, the
+      // mirror effect fires immediately with the fresh (empty) Y.Text, and if
+      // contentRef still held the outgoing page it would seed the new page's
+      // doc with that text — and relay it to the server for this sheet.
+      contentRef.current = "";
+      setContent("");
       // Re-announce which sheet I'm on so remote carets re-scope
       try {
         const me = getIdentity();
@@ -746,7 +883,11 @@ export default function PastePage() {
       setDocVersion((v) => v + 1); // ytext memo follows the swapped doc
 
       try {
-        const res = await axios.get(`${API_BASE}/api/paste/${slug}/sheets/${sheetId}`);
+        // v3.5.1: locked pastes must send the session password on every read
+        const pwQ = lockedPastePasswords.current[slug]
+          ? `?pw=${encodeURIComponent(lockedPastePasswords.current[slug])}`
+          : "";
+        const res = await axios.get(`${API_BASE}/api/paste/${slug}/sheets/${sheetId}${pwQ}`);
         setLanguage(res.data.language || "plaintext");
         const c = res.data.content || "";
         setContent(c);
@@ -793,6 +934,49 @@ export default function PastePage() {
       toast.error(err?.response?.data?.detail || "Could not create page");
     }
   }, [canEdit, slug, refreshSheets, switchSheet]);
+
+  // v3.9.0 — move a page left/right within the tab bar (main stays first).
+  const moveSheet = useCallback(
+    async (sheetId, delta) => {
+      if (!canEdit) return;
+      const order = sheets.map((s) => s.sheetId);
+      const from = order.indexOf(sheetId);
+      const to = from + delta;
+      if (from < 1 || to < 1 || to >= order.length) return; // never move "main"
+      order.splice(to, 0, order.splice(from, 1)[0]);
+      try {
+        await axios.post(`${API_BASE}/api/paste/${slug}/sheets/reorder`, {
+          editToken: editTokenStore.get(slug),
+          order,
+        });
+        await refreshSheets();
+      } catch (err) {
+        toast.error(err?.response?.data?.detail || "Reorder failed");
+      }
+    },
+    [canEdit, sheets, slug, refreshSheets],
+  );
+
+  // v3.8.0 — duplicate a page (content + CRDT history) right after it.
+  const duplicateSheet = useCallback(
+    async (sheetId) => {
+      if (!canEdit) {
+        toast.error("This link is read-only");
+        return;
+      }
+      try {
+        const res = await axios.post(
+          `${API_BASE}/api/paste/${slug}/sheets/${sheetId}/duplicate`,
+          { editToken: editTokenStore.get(slug) },
+        );
+        await refreshSheets();
+        toast.success(`"${res.data.name}" created`);
+      } catch (err) {
+        toast.error(err?.response?.data?.detail || "Duplicate failed");
+      }
+    },
+    [canEdit, slug, refreshSheets],
+  );
 
   const renameSheet = useCallback(
     async (sheetId, name) => {
@@ -857,6 +1041,9 @@ export default function PastePage() {
       }
       const form = new FormData();
       form.append("file", file);
+      if (editToken) form.append("editToken", editToken);
+      const clientId = getIdentity().clientId;
+      if (clientId) form.append("clientId", clientId);
       setUploadPct(0);
       try {
         const res = await axios.post(`${API_BASE}/api/paste/${slug}/file`, form, {
@@ -946,7 +1133,9 @@ export default function PastePage() {
     const newContent = contentRef.current.replace(re, "");
     applyContent(newContent);
     try {
-      await axios.delete(`${API_BASE}/api/file/${file.id}`);
+      await axios.delete(`${API_BASE}/api/file/${file.id}`, {
+        params: { editToken: editToken || "", clientId: getIdentity().clientId || "" },
+      });
       toast.success(`File "${file.name}" deleted`);
     } catch (err) {
       toast.error("Could not delete file (reference removed)");
@@ -957,6 +1146,34 @@ export default function PastePage() {
     const ok = await copyToClipboard(`${API_BASE}/api/file/${file.id}`);
     if (ok) toast.success("File URL copied");
     else toast.error("Could not copy URL");
+  };
+
+  // v3.7.0 — fork: server-side full copy (content, pages, files); the new
+  // paste's edit token is stored locally so the creator lands in edit mode.
+  const handleFork = async () => {
+    try {
+      setForking(true);
+      const clientId = getIdentity().clientId;
+      const res = await axios.post(
+        `${API_BASE}/api/paste/${slug}/fork`,
+        { editToken: editToken || "", copyFiles: true },
+        { params: clientId ? { clientId } : {} },
+      );
+      const { slug: newSlug, editToken: newToken } = res.data;
+      if (newToken) {
+        try {
+          localStorage.setItem(`lp_edit_${newSlug}`, newToken);
+        } catch {
+          /* private mode */
+        }
+      }
+      toast.success("Fork created — opening your copy");
+      navigate(`/${newSlug}`);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Fork failed");
+    } finally {
+      setForking(false);
+    }
   };
 
   const handleCopyLink = async () => {
@@ -1000,9 +1217,26 @@ export default function PastePage() {
     if (showHistory && revisions === null) loadRevisions();
   }, [showHistory, revisions, loadRevisions]);
 
+  // v3.12.0 — load a revision and diff it against the current content.
+  const handleDiffRevision = async (rev) => {
+    try {
+      const pwQ = lockedPastePasswords.current[slug]
+        ? `?pw=${encodeURIComponent(lockedPastePasswords.current[slug])}`
+        : "";
+      const res = await axios.get(`${API_BASE}/api/paste/${slug}/revisions/${rev}${pwQ}`);
+      setDiffData({ oldText: res.data.content || "", newText: contentRef.current || "" });
+      setDiffRev(rev);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not load revision");
+    }
+  };
+
   const handleRestoreRevision = async (rev) => {
     try {
-      const res = await axios.get(`${API_BASE}/api/paste/${slug}/revisions/${rev}`);
+      const pwQ = lockedPastePasswords.current[slug]
+        ? `?pw=${encodeURIComponent(lockedPastePasswords.current[slug])}`
+        : "";
+      const res = await axios.get(`${API_BASE}/api/paste/${slug}/revisions/${rev}${pwQ}`);
       const restored = res.data.content;
       await axios.post(`${API_BASE}/api/paste/${slug}/restore`, {
         editToken,
@@ -1026,6 +1260,27 @@ export default function PastePage() {
       toast.error("Could not copy content");
     }
   };
+
+  // v3.15.0 — command palette actions. MUST stay below every function it lists in
+  // its dependency array (createSheet, duplicateSheet, handleCopy*): the deps array
+  // is evaluated during render, so an earlier position is a TDZ ReferenceError.
+  const paletteActions = useMemo(() => {
+    const acts = [
+      { group: "Pages", label: "Add new page", shortcut: "", run: createSheet, disabled: !canEdit, testid: "palette-add-page" },
+      { group: "Pages", label: "Duplicate current page", run: () => duplicateSheet(activeSheetRef.current), disabled: !canEdit, testid: "palette-duplicate-page" },
+      { group: "Edit", label: "Find & replace", shortcut: "⌘H", run: () => setShowFind(true), disabled: false, testid: "palette-find" },
+      { group: "View", label: mdPreview ? "Hide markdown preview" : "Markdown preview", run: () => setMdPreview((v) => !v), disabled: false, testid: "palette-md" },
+      { group: "View", label: htmlPreview ? "Hide HTML preview" : "HTML preview", run: () => setHtmlPreview((v) => !v), disabled: !(language === "html" || /<html[\s>]|<!doctype html/i.test(content || "")), testid: "palette-html" },
+      { group: "View", label: showHistory ? "Close revision history" : "Revision history", run: () => setShowHistory((v) => !v), disabled: false, testid: "palette-history" },
+      { group: "Share", label: "Copy view-only link", run: handleCopyLink, disabled: false, testid: "palette-copy-view-link" },
+      { group: "Share", label: "Copy content", run: handleCopyContent, disabled: false, testid: "palette-copy-content" },
+      { group: "Share", label: "Fork this paste", run: handleFork, disabled: false, testid: "palette-fork" },
+    ];
+    if (canEdit && editToken) {
+      acts.splice(2, 0, { group: "Share", label: "Copy edit link", run: handleCopyEditLink, disabled: false, testid: "palette-copy-edit-link" });
+    }
+    return acts;
+  }, [canEdit, editToken, mdPreview, htmlPreview, showHistory, language, content, createSheet, duplicateSheet, handleCopyLink, handleCopyEditLink, handleCopyContent, handleFork]);
 
   // ---- derived stats ----
   const lineCount = useMemo(() => content.split("\n").length, [content]);
@@ -1059,7 +1314,11 @@ export default function PastePage() {
           toast.error("Wrong password");
         }
       } catch (err) {
-        toast.error(err?.response?.data?.detail === "Paste not found or expired" ? "Paste not found" : "Could not verify password");
+        if (err?.response?.status === 429) {
+          toast.error("Too many attempts — try again in a few minutes");
+        } else {
+          toast.error(err?.response?.data?.detail === "Paste not found or expired" ? "Paste not found" : "Could not verify password");
+        }
       }
     };
     return (
@@ -1120,6 +1379,41 @@ export default function PastePage() {
                 ? "The paste at this address reached its expiry and was deleted."
                 : `There's no paste at /${slug}. It may have expired, been deleted, or the URL is wrong.`}
             </p>
+            {localCopyAvailable && !expired && (
+              <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm" data-testid="local-copy-rescue">
+                <p className="font-medium">You have a local copy of this paste.</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  The server may have restarted in temporary mode and wiped it. You can restore your
+                  offline copy as a brand-new paste — everything you had is preserved.
+                </p>
+                <Button
+                  size="sm"
+                  className="mt-2"
+                  data-testid="restore-local-copy-button"
+                  onClick={async () => {
+                    try {
+                      const text = await readOfflineDoc(slug, "main");
+                      const create = await fetch("/api/paste", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ content: text || "", expiry: "never" }),
+                      }).then((r) => r.json());
+                      if (create.slug) {
+                        editTokenStore.save(create.slug, create.editToken || "");
+                        toast.success("Restored as a new paste");
+                        window.location.assign(`/${create.slug}`);
+                      } else {
+                        toast.error("Could not restore — try creating a paste manually");
+                      }
+                    } catch (e) {
+                      toast.error("Could not read the local copy");
+                    }
+                  }}
+                >
+                  <RotateCcw className="h-4 w-4 mr-2" /> Restore local copy as new paste
+                </Button>
+              </div>
+            )}
             <Button
               className="mt-6"
               onClick={() => navigate("/")}
@@ -1243,6 +1537,18 @@ export default function PastePage() {
                     </span>
                   </DropdownMenuItem>
                 )}
+                <DropdownMenuItem
+                  onSelect={handleFork}
+                  data-testid="paste-toolbar-fork-button"
+                >
+                  <GitFork className="mr-2 h-4 w-4" />
+                  <span className="flex-1">
+                    <span className="block text-sm font-medium">Fork this paste</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Full independent copy — pages, files and all
+                    </span>
+                  </span>
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
             <Button
@@ -1256,6 +1562,32 @@ export default function PastePage() {
               {copiedContent ? <Check className="h-3.5 w-3.5 sm:mr-1.5" /> : <Copy className="h-3.5 w-3.5 sm:mr-1.5" />}
               <span className="hidden sm:inline">{copiedContent ? "Copied" : "Copy text"}</span>
             </Button>
+            <Button
+              variant={mdPreview ? "default" : "outline"}
+              size="sm"
+              onClick={() => setMdPreview((v) => !v)}
+              data-testid="paste-toolbar-markdown-button"
+              className="shrink-0 active:scale-[0.98]"
+              aria-label="Toggle markdown preview"
+              aria-pressed={mdPreview}
+            >
+              <FileText className="h-3.5 w-3.5 sm:mr-1.5" />
+              <span className="hidden sm:inline">MD</span>
+            </Button>
+            {(language === "html" || /<html[\s>]|<!doctype html/i.test(content || "")) && (
+              <Button
+                variant={htmlPreview ? "default" : "outline"}
+                size="sm"
+                onClick={() => setHtmlPreview((v) => !v)}
+                data-testid="paste-toolbar-html-preview-button"
+                className="shrink-0 active:scale-[0.98]"
+                aria-label="Toggle sandboxed HTML preview"
+                aria-pressed={htmlPreview}
+              >
+                <Globe className="h-3.5 w-3.5 sm:mr-1.5" />
+                <span className="hidden sm:inline">Run HTML</span>
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -1338,15 +1670,34 @@ export default function PastePage() {
                     // eslint-disable-next-line no-alert
                     const next = window.prompt("Your display name", myName);
                     if (next && next.trim()) {
-                      setDisplayName(next.trim());
-                      setMyName(next.trim());
+                      const id = setDisplayName(next.trim());
+                      setMyName(id.name);
+                      // v3.4.0: re-announce immediately so everyone's avatar
+                      // chips and cursor tags update live, not on next keystroke
+                      try {
+                        const w = wsRef.current;
+                        if (w?.readyState === WebSocket.OPEN) {
+                          w.send(JSON.stringify({ type: "hello", i: { clientId: id.clientId, name: id.name, color: id.color, initials: id.initials, sheetId: activeSheetRef.current } }));
+                        }
+                      } catch (e) { /* ignore */ }
+                    }
+                  } : isOwner && !p.me ? () => {
+                    // v3.3.0: owner clicks a peer's avatar to grant/revoke edit access
+                    const granted = editors.includes(p.clientId);
+                    if (wsRef.current?.readyState === WebSocket.OPEN) {
+                      wsRef.current.send(JSON.stringify({ type: granted ? "revoke-edit" : "grant-edit", clientId: p.clientId }));
+                      toast.info(granted ? `Revoked edit access from ${p.name}` : `Granted edit access to ${p.name} ✏️`);
                     }
                   } : undefined}
-                  className={`relative inline-flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-semibold text-white ring-2 ring-background ${i > 0 ? "-ml-2" : ""} hover:z-10 transition-transform hover:scale-110`}
+                  className={`relative inline-flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-semibold text-white ring-2 ring-background ${i > 0 ? "-ml-2" : ""} hover:z-10 transition-transform hover:scale-110 ${isOwner && !p.me && editors.includes(p.clientId) ? "ring-2 ring-emerald-400" : ""}`}
                   style={{ backgroundColor: p.color, zIndex: arr.length - i }}
                   data-testid={`paste-presence-avatar-${p.clientId}`}
+                  data-editable={isOwner && !p.me ? String(editors.includes(p.clientId)) : undefined}
                 >
                   {p.initials}
+                  {isOwner && !p.me && editors.includes(p.clientId) && (
+                    <span className="absolute -bottom-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-emerald-500 text-[7px] text-white">✎</span>
+                  )}
                 </button>
               ))}
               {peers.length > 5 && (
@@ -1418,17 +1769,24 @@ export default function PastePage() {
 
             {showQr && (
               <div
-                className="flex flex-col items-center gap-1 rounded-lg border border-border bg-card p-2 shadow-sm"
+                className="lp-qr-overlay"
                 data-testid="paste-toolbar-qr"
+                onClick={() => setShowQr(false)}
               >
-                <QRCodeSVG
-                  value={`${window.location.origin}/${slug}`}
-                  size={92}
-                  bgColor="transparent"
-                  fgColor="currentColor"
-                  data-testid="paste-toolbar-qr-canvas"
-                />
-                <span className="text-[10px] text-muted-foreground">scan to open</span>
+                <div
+                  className="flex flex-col items-center gap-2 rounded-xl border border-border bg-card p-4 shadow-lg"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <QRCodeSVG
+                    value={`${window.location.origin}/${slug}`}
+                    size={148}
+                    bgColor="transparent"
+                    fgColor="currentColor"
+                    data-testid="paste-toolbar-qr-canvas"
+                  />
+                  <span className="text-xs font-medium">scan to open this paste</span>
+                  <span className="text-[10px] text-muted-foreground">{window.location.origin}/{slug}</span>
+                </div>
               </div>
             )}
 
@@ -1507,7 +1865,7 @@ export default function PastePage() {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem
-                    onSelect={() => recorder.start("voice")}
+                    onSelect={() => handleRecord("voice")}
                     data-testid="paste-record-voice"
                   >
                     <Mic className="mr-2 h-4 w-4" />
@@ -1517,7 +1875,7 @@ export default function PastePage() {
                     </span>
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    onSelect={() => recorder.start("screen")}
+                    onSelect={() => handleRecord("screen")}
                     data-testid="paste-record-screen"
                   >
                     <MonitorUp className="mr-2 h-4 w-4" />
@@ -1540,7 +1898,7 @@ export default function PastePage() {
         className="flex items-center gap-1 px-3 sm:px-4 py-1 border-b border-border bg-background overflow-x-auto"
         data-testid="paste-sheets-bar"
       >
-        {sheets.map((s) => {
+        {sheets.map((s, idx) => {
           const active = s.sheetId === activeSheet;
           const isRenaming = renamingSheet === s.sheetId;
           return (
@@ -1578,6 +1936,42 @@ export default function PastePage() {
               ) : (
                 <>
                   <span className="max-w-[160px] truncate">{s.name}</span>
+                  {canEdit && (
+                    <button
+                      className="ml-1.5 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground"
+                      aria-label={`Duplicate ${s.name}`}
+                      data-testid={`paste-sheet-duplicate-${s.sheetId}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        duplicateSheet(s.sheetId);
+                      }}
+                    >
+                      <Copy className="h-3 w-3" />
+                    </button>
+                  )}
+                  {canEdit && s.sheetId !== "main" && (
+                    <span
+                      className="ml-0.5 flex opacity-0 group-hover:opacity-100"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+                        aria-label={`Move ${s.name} left`}
+                        disabled={idx === 0}
+                        onClick={() => moveSheet(s.sheetId, -1)}
+                      >
+                        <ChevronLeft className="h-3 w-3" />
+                      </button>
+                      <button
+                        className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+                        aria-label={`Move ${s.name} right`}
+                        disabled={idx === sheets.length - 1}
+                        onClick={() => moveSheet(s.sheetId, 1)}
+                      >
+                        <ChevronRight className="h-3 w-3" />
+                      </button>
+                    </span>
+                  )}
                   {canEdit && s.sheetId !== "main" && (
                     <button
                       className="ml-1.5 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
@@ -1644,6 +2038,88 @@ export default function PastePage() {
             <EyeIcon className="h-3.5 w-3.5" /> Read-only — ask the owner for an edit link
           </div>
         )}
+        {showFind && (
+          <div
+            className="absolute top-2 right-2 z-40 flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 shadow-md"
+            data-testid="paste-find-bar"
+          >
+            <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <input
+              autoFocus
+              value={findText}
+              onChange={(e) => setFindText(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleReplaceAll()}
+              placeholder="Find…"
+              className="bg-transparent outline-none text-xs w-32 sm:w-44"
+              data-testid="paste-find-input"
+            />
+            <button
+              onClick={() => setFindCase((v) => !v)}
+              className={`text-[10px] font-mono px-1 rounded ${findCase ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground"}`}
+              aria-label="Match case"
+              title="Match case"
+            >
+              Aa
+            </button>
+            <span className="text-[10px] text-muted-foreground tabular-nums w-10 text-center">
+              {findText ? `${matchCount} hit${matchCount === 1 ? "" : "s"}` : ""}
+            </span>
+            <input
+              value={replaceText}
+              onChange={(e) => setReplaceText(e.target.value)}
+              placeholder="Replace with…"
+              className="bg-transparent outline-none text-xs w-32 sm:w-44 border-l border-border pl-2"
+              data-testid="paste-replace-input"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 text-[11px] px-2"
+              disabled={!canEdit || !findText || matchCount === 0}
+              onClick={handleReplaceAll}
+              data-testid="paste-replace-all-button"
+            >
+              Replace all
+            </Button>
+            <button
+              onClick={() => setShowFind(false)}
+              className="text-muted-foreground hover:text-foreground"
+              aria-label="Close find bar"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+        {mdPreview && (
+          <div className="absolute inset-0 z-20 bg-[hsl(var(--editor-bg))] flex flex-col" data-testid="paste-markdown-preview">
+            <div className="flex items-center justify-between px-4 py-2 border-b border-border text-xs text-muted-foreground">
+              <span className="font-medium">Markdown preview — live</span>
+              <Button variant="ghost" size="sm" onClick={() => setMdPreview(false)} aria-label="Back to editor" data-testid="paste-markdown-close">
+                <X className="h-3.5 w-3.5 mr-1" /> Edit
+              </Button>
+            </div>
+            <MarkdownView content={content} />
+          </div>
+        )}
+        {htmlPreview && (
+          <div className="absolute inset-0 z-20 bg-[hsl(var(--editor-bg))] flex flex-col" data-testid="paste-html-preview">
+            <div className="flex items-center justify-between px-4 py-2 border-b border-border text-xs text-muted-foreground">
+              <span className="font-medium">HTML preview — sandboxed, scripts run in isolation</span>
+              <Button variant="ghost" size="sm" onClick={() => setHtmlPreview(false)} aria-label="Back to editor" data-testid="paste-html-close">
+                <X className="h-3.5 w-3.5 mr-1" /> Edit
+              </Button>
+            </div>
+            {/* sandbox="allow-scripts" without allow-same-origin: the frame gets
+                a unique opaque origin — it can run JS but cannot touch this
+                app's storage/cookies/DOM, and cannot make same-origin reads. */}
+            <iframe
+              title="HTML preview"
+              className="flex-1 w-full bg-white"
+              sandbox="allow-scripts allow-modals"
+              srcDoc={content}
+            />
+          </div>
+        )}
         <InlineBlocksEditor
           ref={editorApiRef}
           content={content}
@@ -1698,19 +2174,43 @@ export default function PastePage() {
                     </div>
                   </div>
                   {canEdit && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleRestoreRevision(r.rev)}
-                      className="shrink-0 h-7 text-xs"
-                      data-testid={`paste-history-restore-${r.rev}`}
-                    >
-                      Restore
-                    </Button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDiffRevision(r.rev)}
+                        className="h-7 text-xs"
+                        data-testid={`paste-history-diff-${r.rev}`}
+                      >
+                        Diff
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleRestoreRevision(r.rev)}
+                        className="h-7 text-xs"
+                        data-testid={`paste-history-restore-${r.rev}`}
+                      >
+                        Restore
+                      </Button>
+                    </div>
                   )}
                 </div>
               ))}
             </div>
+            {diffRev !== null && diffData && (
+              <div className="border-t border-border flex flex-col" style={{ height: "45%" }}>
+                <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+                  <span className="text-xs font-medium" data-testid="paste-diff-title">
+                    rev {diffRev} → current
+                  </span>
+                  <Button variant="ghost" size="sm" onClick={() => { setDiffRev(null); setDiffData(null); }} aria-label="Close diff">
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+                <DiffView oldText={diffData.oldText} newText={diffData.newText} />
+              </div>
+            )}
           </div>
         )}
 
@@ -1740,6 +2240,35 @@ export default function PastePage() {
           paste or drop any file · images, PDFs, zips, everything
         </span>
       </div>
+
+      {/* v3.14.0 — command palette (Ctrl/Cmd+K) */}
+      <CommandDialog open={paletteOpen} onOpenChange={setPaletteOpen}>
+        <CommandInput placeholder="Type a command…" data-testid="palette-input" />
+        <CommandList>
+          <CommandEmpty>No matching command.</CommandEmpty>
+          {["Pages", "Edit", "View", "Share"].map((group) => {
+            const items = paletteActions.filter((a) => a.group === group && !a.disabled);
+            if (!items.length) return null;
+            return (
+              <CommandGroup key={group} heading={group}>
+                {items.map((a) => (
+                  <CommandItem
+                    key={a.testid}
+                    onSelect={() => {
+                      setPaletteOpen(false);
+                      setTimeout(() => a.run(), 60);
+                    }}
+                    data-testid={a.testid}
+                  >
+                    <span className="flex-1">{a.label}</span>
+                    {a.shortcut ? <CommandShortcut>{a.shortcut}</CommandShortcut> : null}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            );
+          })}
+        </CommandList>
+      </CommandDialog>
     </div>
   );
 }

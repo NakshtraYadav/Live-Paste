@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.15.0] - 2026-09-14
+
+### Fixed
+- **Paste page was blank on open (critical):** the v3.14.0 command palette's `useMemo`
+  referenced `createSheet`/`duplicateSheet` — and, one layer deeper, `handleCopy*` —
+  before their declarations, crashing every paste render with a temporal-dead-zone
+  `ReferenceError`. The memo now lives below every function in its dependency array.
+- **CSP broke the app shell:** `script-src 'self'` rejected the inline error-guard
+  script in `index.html`. The guard moved to `/error-guard.js`, so the app boots under
+  the strict v3.5.1 Content-Security-Policy (no `unsafe-inline` added).
+- **Stale app after server updates (HTTP cache):** the HTML shell and unhashed root
+  files were heuristically cached by browsers, so returning users kept loading an old
+  JS bundle. The SPA now serves `Cache-Control: no-cache` for `index.html`, `sw.js`
+  and root files — hashed `/assets` stay `immutable`.
+- **Service worker cache version bumped** (`lp-v3.15.0`) so installed clients pick up
+  the new bundle instead of serving a stale shell.
+
+### Verified
+- 41/41 offline tests green; end-to-end create → live paste page render re-checked in
+  the running preview at `http://127.0.0.1:8123`.
+
+---
+
 ## [3.14.0] - 2026-09-14
 
 ### Added

@@ -40,6 +40,11 @@ export function useRecorder({ onComplete }) {
       let stream;
       try {
         if (kind === "screen") {
+          // Mobile browsers (iOS Safari, Android Chrome) don't offer display
+          // capture — surface that cleanly instead of throwing deep inside.
+          if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== "function") {
+            return "unsupported";
+          }
           stream = await navigator.mediaDevices.getDisplayMedia({
             video: { frameRate: 15 },
             audio: true, // browser may offer tab/system audio
@@ -59,7 +64,16 @@ export function useRecorder({ onComplete }) {
       }
       streamRef.current = stream;
       chunksRef.current = [];
-      const mimeCandidates = ["audio/webm;codecs=opus", "audio/webm", "video/webm;codecs=vp8,opus", "video/webm"];
+      // iOS Safari can't produce webm — it records AAC in an MP4 container;
+      // Firefox mobile offers ogg/opus. Pick the first the browser supports.
+      const mimeCandidates = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/mp4", // iOS Safari
+        "audio/ogg;codecs=opus", // Firefox
+        "video/webm;codecs=vp8,opus",
+        "video/webm",
+      ];
       const mimeType = mimeCandidates.find((m) => {
         try {
           return MediaRecorder.isTypeSupported(m);
@@ -89,10 +103,14 @@ export function useRecorder({ onComplete }) {
           onCompleteRef.current(blob, kind === "screen" ? "screen-note" : "voice-note");
         }
       };
-      // Screen-share "Stop sharing" chrome button ends the recording too
-      stream.getVideoTracks()[0]?.addEventListener("ended", () => {
+      // ANY track ending (user clicks the browser's "Stop sharing", mic is
+      // unplugged, OS revokes permission) finishes the recording cleanly —
+      // previously only the screen video track was watched, so a voice note
+      // whose mic track died silently produced an empty/unusable file.
+      const onTrackEnded = () => {
         if (recorderRef.current === rec && rec.state !== "inactive") rec.stop();
-      });
+      };
+      for (const track of stream.getTracks()) track.addEventListener("ended", onTrackEnded);
       rec.start(1000); // 1s chunks keep memory flat on long notes
       setRecording(kind);
       setSeconds(0);

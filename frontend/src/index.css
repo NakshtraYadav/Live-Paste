@@ -690,3 +690,16 @@
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--muted-foreground) / 0.4);
 }
+
+/* QR overlay (v3.4.0): centered modal card so the code never overlaps
+   toolbar dropdowns, badges, or the editor gutter. Click backdrop to close. */
+.lp-qr-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: hsl(var(--background) / 0.72);
+  backdrop-filter: blur(2px);
+}

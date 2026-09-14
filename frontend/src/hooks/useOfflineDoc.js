@@ -36,6 +36,20 @@ export function useOfflineDoc({ slug, ydocRef, docVersion, sheetRef, enabled }) 
 }
 
 /**
+ * Checks whether a locally persisted copy exists for `slug::sheetId` — used to
+ * distinguish "server restarted & wiped the paste" from a genuinely dead link
+ * (v3.4.0 reconnect-after-restart rescue).
+ */
+export async function hasOfflineDoc(slug, sheetId = "main") {
+  try {
+    const text = await readOfflineDoc(slug, sheetId, 1200);
+    return Boolean(text && text.length > 0);
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
  * Reads the locally persisted text for `slug::sheetId` without touching the
  * network — used for the offline cold start (server unreachable, paste cached).
  */

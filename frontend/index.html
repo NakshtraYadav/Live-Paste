@@ -17,9 +17,7 @@
       rel="stylesheet"
     />
     <title>LivePaste</title>
-    <script>
-      window.addEventListener("error",function(e){if(e.error instanceof DOMException&&e.error.name==="DataCloneError"&&e.message&&e.message.includes("PerformanceServerTiming")){e.stopImmediatePropagation();e.preventDefault()}},true);
-    </script>
+    <script src="/error-guard.js"></script>
   </head>
   <body>
     <div id="root"></div>

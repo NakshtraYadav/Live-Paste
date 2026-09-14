@@ -45,13 +45,16 @@ export default function useCollab({ wsRef, slug, canEdit, enabled, ydocRef, docV
     const flush = () => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      const sid = sheetRef ? sheetRef.current : "main";
-      const msg = sid === "main" ? { type: "yupdate" } : { type: "s:yupdate", sheetId: sid };
       const list = pendingRef.current;
       pendingRef.current = [];
-      for (const u of list) {
+      for (const { sid, update } of list) {
+        // Each queued update carries the sheet it was typed on. Stamping at
+        // QUEUE time (not flush time) is critical: a sheet switch within the
+        // 120ms coalescing window used to re-label page-1 edits onto the new
+        // page, making fresh pages inherit the previous page's content.
+        const msg = sid === "main" ? { type: "yupdate" } : { type: "s:yupdate", sheetId: sid };
         try {
-          ws.send(JSON.stringify({ ...msg, updateB64: encode(u) }));
+          ws.send(JSON.stringify({ ...msg, updateB64: encode(update) }));
         } catch (e) {
           /* ignore */
         }
@@ -61,7 +64,8 @@ export default function useCollab({ wsRef, slug, canEdit, enabled, ydocRef, docV
     const onUpdate = (update, origin) => {
       // origin === null → local transaction; relay it so peers merge our delta
       if (origin !== null) return;
-      pendingRef.current.push(update);
+      const sid = sheetRef ? sheetRef.current : "main";
+      pendingRef.current.push({ sid, update });
       flush();
     };
     doc.on("update", onUpdate);

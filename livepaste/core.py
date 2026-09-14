@@ -1623,5 +1623,14 @@ if (STATIC_DIR / "index.html").exists() and os.environ.get("LIVEPASTE_SERVE_STAT
             and candidate.is_file()
             and str(candidate).startswith(str(STATIC_DIR.resolve()))
         ):
-            return FileResponse(candidate)
-        return FileResponse(STATIC_DIR / "index.html")
+            # /sw.js must ALWAYS be revalidated or updates never reach clients
+            if full_path == "sw.js":
+                return FileResponse(candidate, headers={"Cache-Control": "no-cache"})
+            # everything else at the root is unhashed; revalidate each load
+            return FileResponse(candidate, headers={"Cache-Control": "no-cache"})
+        # v3.15.0: the HTML shell must never be served from a stale HTTP cache —
+        # returning users kept loading an old bundle after a server update.
+        return FileResponse(
+            STATIC_DIR / "index.html",
+            headers={"Cache-Control": "no-cache"},
+        )
