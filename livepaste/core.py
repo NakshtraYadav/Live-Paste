@@ -39,6 +39,7 @@ from fastapi import (
     HTTPException,
     UploadFile,
     File,
+    Form,
     Request,
 )
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
@@ -47,7 +48,7 @@ from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from . import __version__
-from .storage import create_storage, FileTooLarge, now_utc
+from .storage import create_storage, FileTooLarge, PasteQuotaExceeded, now_utc
 
 logging.basicConfig(
     level=logging.INFO,
@@ -152,7 +153,7 @@ def _pw_clear(ip: str, slug: str) -> None:
 
 
 def ws_client_ip(websocket) -> str:
-    fwd = websocket.headers.get("x-forwarded-for") if hasattr(websocket, "headers") else None
+    fwd = websocket.headers.get("x-forwarded-for") if _TRUST_PROXY and hasattr(websocket, "headers") else None
     if fwd:
         return fwd.split(",")[0].strip()
     client = getattr(websocket, "client", None)
@@ -162,6 +163,7 @@ def ws_client_ip(websocket) -> str:
 MAX_CONTENT_SIZE = 400_000  # ~400KB max paste size
 MAX_SHEETS_PER_PASTE = 32
 MAX_SHEET_NAME_LEN = 60
+MAX_GRANTED_EDITORS = 50  # per-user edit permissions allowlist cap (v3.3.0)
 RESERVED_SLUGS = {
     "api", "ws", "static", "assets", "favicon.ico", "robots.txt",
     "index.html", "manifest.json", "new", "about",
@@ -256,8 +258,15 @@ class RateLimiter:
 limiter = RateLimiter()
 
 
+# v3.5.1 (security): X-Forwarded-For is client-controllable. Trusting it by
+# default let any caller rotate their apparent IP (defeating rate limits and
+# brute-force lockouts). Only honor it behind a trusted proxy, opted in via
+# LIVEPASTE_TRUST_PROXY=1 (a reverse proxy that OVERWRITES the header).
+_TRUST_PROXY = os.environ.get("LIVEPASTE_TRUST_PROXY", "") in ("1", "true", "yes")
+
+
 def client_ip(request: Request) -> str:
-    fwd = request.headers.get("x-forwarded-for")
+    fwd = request.headers.get("x-forwarded-for") if _TRUST_PROXY else None
     if fwd:
         return fwd.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
@@ -311,6 +320,33 @@ def require_edit_token(paste: dict, provided: Optional[str]):
         return
     if not provided or not secrets.compare_digest(str(provided), str(token)):
         raise HTTPException(status_code=403, detail="Edit token required (read-only link)")
+
+
+def _allowed_editors(paste: dict) -> list:
+    """ClientIds granted per-user edit permission (v3.3.0)."""
+    return [e for e in (paste.get("editors") or []) if e]
+
+
+def can_user_edit(paste: dict, edit_token: str = "", client_id: str = "") -> bool:
+    """Full edit-rights check used by REST, WebSocket and file endpoints.
+
+    True when any of: legacy paste (no token), matching edit token, or the
+    user's presence clientId is on the paste's per-user editors allowlist
+    (granted live by the owner — v3.3.0).
+    """
+    token = paste.get("editToken")
+    if not token:
+        return True  # legacy paste — open to all
+    if edit_token and secrets.compare_digest(str(edit_token), str(token)):
+        return True
+    if client_id and client_id in _allowed_editors(paste):
+        return True
+    return False
+
+
+def require_user_edit(paste: dict, edit_token: str = "", client_id: str = ""):
+    if not can_user_edit(paste, edit_token, client_id):
+        raise HTTPException(status_code=403, detail="Edit permission required (read-only)")
 
 
 # ---------------- REST endpoints ----------------
@@ -416,7 +452,11 @@ def check_password(password: str, stored: Optional[str]) -> bool:
 
 def _redact_paste(paste: dict) -> dict:
     """Public paste view — never leaks the edit token, password hash or burner list."""
-    return {k: v for k, v in paste.items() if k not in ("editToken", "passwordHash", "burnedBy")}
+    return {
+        k: v
+        for k, v in paste.items()
+        if k not in ("editToken", "passwordHash", "burnedBy", "editors")
+    }
 
 
 @api_router.get("/paste/{slug}")
@@ -526,10 +566,16 @@ async def list_sheets(slug: str):
 
 
 @api_router.get("/paste/{slug}/sheets/{sheet_id}")
-async def get_sheet(slug: str, sheet_id: str):
+async def get_sheet(slug: str, sheet_id: str, pw: str = ""):
     paste = await get_paste_doc(slug)
     if not paste:
         raise HTTPException(status_code=404, detail="Paste not found or expired")
+    # v3.5.1 (security): locked pastes must authenticate on EVERY read path,
+    # not just GET /paste/{slug} — this endpoint previously leaked sheet
+    # content to anyone with the URL while the paste page showed a lock.
+    pw_hash = paste.get("passwordHash")
+    if pw_hash and not check_password(pw, pw_hash):
+        raise HTTPException(status_code=401, detail="Password required")
     if sheet_id == "main":
         return {"sheetId": "main", "name": "Page 1", "content": paste["content"], "language": paste["language"], "position": 0}
     sheet = await storage.get_sheet(slug, sheet_id)
@@ -622,10 +668,15 @@ async def list_revisions(slug: str):
 
 
 @api_router.get("/paste/{slug}/revisions/{rev}")
-async def get_revision(slug: str, rev: int):
+async def get_revision(slug: str, rev: int, pw: str = ""):
     paste = await get_paste_doc(slug)
     if not paste:
         raise HTTPException(status_code=404, detail="Paste not found or expired")
+    # v3.5.1 (security): same gate as sheets — revision content is paste
+    # content and must not be readable around the lock screen.
+    pw_hash = paste.get("passwordHash")
+    if pw_hash and not check_password(pw, pw_hash):
+        raise HTTPException(status_code=401, detail="Password required")
     r = await storage.get_revision(slug, rev)
     if not r:
         raise HTTPException(status_code=404, detail="Revision not found")
@@ -650,6 +701,12 @@ async def _upload_file(slug: str, file: UploadFile, request: Request):
         file_id, size = await storage.save_file(slug, filename, content_type, file)
     except FileTooLarge:
         raise HTTPException(status_code=413, detail="File too large (max 100MB)")
+    except PasteQuotaExceeded as q:
+        mb_used, mb_quota = q.used // (1024 * 1024), q.quota // (1024 * 1024)
+        raise HTTPException(
+            status_code=413,
+            detail=f"Paste storage quota full: {mb_used}MB of {mb_quota}MB used. Delete some files first.",
+        )
     except Exception as e:
         logger.error(f"File upload failed for {slug}: {e}")
         raise HTTPException(status_code=500, detail="File upload failed, please try again")
@@ -689,8 +746,18 @@ async def _delete_file(file_id: str):
 
 
 @api_router.post("/paste/{slug}/file")
-async def upload_file(slug: str, file: UploadFile = File(...), request: Request = None):
+async def upload_file(
+    slug: str,
+    file: UploadFile = File(...),
+    request: Request = None,
+    editToken: str = Form(""),
+    clientId: str = Form(""),
+):
     """Upload any file (max 100MB) attached to a paste."""
+    paste = await get_paste_doc(slug)
+    if not paste:
+        raise HTTPException(status_code=404, detail="Paste not found or expired")
+    require_user_edit(paste, editToken, clientId)
     return await _upload_file(slug, file, request)
 
 
@@ -701,17 +768,37 @@ async def get_file(file_id: str):
 
 
 @api_router.delete("/file/{file_id}")
-async def delete_file(file_id: str):
+async def delete_file(
+    file_id: str,
+    editToken: str = "",
+    clientId: str = "",
+):
+    """Delete an uploaded file. Requires edit rights on its paste (v3.3.0)."""
+    rec = await storage.find_file(file_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="File not found")
+    paste = await get_paste_doc(rec.get("slug", ""))
+    require_user_edit(paste or {}, editToken, clientId)
     return await _delete_file(file_id)
 
 
 # ---- Legacy image endpoints (kept for old clients / existing pastes) ----
 
 @api_router.post("/paste/{slug}/image")
-async def upload_image(slug: str, file: UploadFile = File(...), request: Request = None):
+async def upload_image(
+    slug: str,
+    file: UploadFile = File(...),
+    request: Request = None,
+    editToken: str = Form(""),
+    clientId: str = Form(""),
+):
     content_type = file.content_type or ""
     if not content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Only image files are allowed")
+    paste = await get_paste_doc(slug)
+    if not paste:
+        raise HTTPException(status_code=404, detail="Paste not found or expired")
+    require_user_edit(paste, editToken, clientId)
     return await _upload_file(slug, file, request)
 
 
@@ -895,7 +982,10 @@ async def ws_paste(websocket: WebSocket, slug: str):
             burn_note = view_info.get("burnAfterViews") or None
 
         stored = paste.get("editToken")
-        can_edit = (not stored) or bool(token) and secrets.compare_digest(token, str(stored))
+        is_owner = (not stored) or bool(token) and secrets.compare_digest(token, str(stored))
+        # v3.3.0: per-user edit permissions — token holders (owners) can grant
+        # edit rights to specific people by their presence clientId.
+        can_edit = can_user_edit(paste, token, client_id)
 
         await manager.join(slug, websocket, can_edit)
         joined = True
@@ -905,6 +995,8 @@ async def ws_paste(websocket: WebSocket, slug: str):
             "paste": _redact_paste(paste),
             "viewers": manager.viewer_count(slug),
             "canEdit": can_edit,
+            "isOwner": is_owner,
+            "editors": _allowed_editors(paste),
         }
         if burn_note:
             init_msg["burnAfterViews"] = burn_note
@@ -1127,6 +1219,40 @@ async def ws_paste(websocket: WebSocket, slug: str):
                 )
                 continue
 
+            if mtype in ("grant-edit", "revoke-edit"):
+                # v3.3.0: per-user edit permissions. Only token holders (or
+                # legacy open pastes) may change the allowlist; every other
+                # socket learns instantly via the editors broadcast.
+                if not is_owner:
+                    await websocket.send_text(
+                        json.dumps(
+                            {"type": "error", "code": "not_owner", "message": "Only the paste owner can change permissions"}
+                        )
+                    )
+                    continue
+                target = str(msg.get("clientId") or "")[:64]
+                current = await get_paste_doc(slug)
+                if not current:
+                    await websocket.send_text(
+                        json.dumps({"type": "error", "code": "expired", "message": "This paste has expired"})
+                    )
+                    await _try_close(websocket, 4410)
+                    break
+                editors = [e for e in _allowed_editors(current) if e != target]
+                if mtype == "grant-edit":
+                    if target and len(editors) < MAX_GRANTED_EDITORS:
+                        editors.append(target)
+                    else:
+                        await websocket.send_text(
+                            json.dumps({"type": "error", "code": "editors_full", "message": f"Too many editors (max {MAX_GRANTED_EDITORS})"})
+                        )
+                        continue
+                await storage.update_editors(slug, editors)
+                await manager.broadcast(
+                    slug, {"type": "editors", "editors": editors, "changed": target, "granted": mtype == "grant-edit"}
+                )
+                continue
+
             if mtype == "edit":
                 content = msg.get("content", "")
                 if len(content) > MAX_CONTENT_SIZE:
@@ -1258,6 +1384,32 @@ async def ws_signaling(websocket: WebSocket):
 
 
 app.include_router(api_router)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """Baseline hardening headers on every response (v3.5.1).
+
+    - X-Content-Type-Options: nosniff (defense in depth; file responses set it too)
+    - Referrer-Policy: pastes often hold private URLs; don't leak them via Referer
+    - X-Frame-Options / frame-ancestors: block clickjacking of the editor & lock screen
+    - CSP: same-origin assets + the Pyodide CDN worker blob (v2.3.0 runnable pastes)
+    """
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "script-src 'self' https://cdn.jsdelivr.net; "
+        "worker-src 'self' blob:; connect-src 'self' wss: ws: https://cdn.jsdelivr.net; "
+        "frame-ancestors 'self'",
+    )
+    return response
+
 
 app.add_middleware(
     CORSMiddleware,

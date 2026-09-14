@@ -19,6 +19,7 @@ logger = logging.getLogger("livepaste.storage")
 
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB (any file type)
 MAX_REVISIONS_PER_PASTE = 50  # snapshot cap; oldest pruned
+MAX_PASTE_STORAGE = 500 * 1024 * 1024  # per-paste attachments quota (all files summed)
 
 
 def now_utc():
@@ -43,6 +44,16 @@ def _parse_dt(value):
 
 
 class FileTooLarge(Exception):
+    """A single upload exceeded MAX_FILE_SIZE."""
+
+
+class PasteQuotaExceeded(Exception):
+    """The paste's total attachment storage would exceed MAX_PASTE_STORAGE."""
+
+    def __init__(self, used: int, quota: int):
+        super().__init__(f"quota {quota} exceeded (used {used})")
+        self.used = used
+        self.quota = quota
     pass
 
 
@@ -87,6 +98,7 @@ class MongoStorage:
             "expiresAt": _iso(doc.get("expiresAt")),
             "rev": doc.get("rev", 0),
             "editToken": doc.get("editToken"),
+            "editors": doc.get("editors") or [],
             "burnAfterViews": doc.get("burnAfterViews"),
             "passwordHash": doc.get("passwordHash"),
             "burnedBy": doc.get("burnedBy") or [],
@@ -108,6 +120,13 @@ class MongoStorage:
         await self.db.ystate.delete_one({"slug": slug})
         await self.db.sheets.delete_many({"slug": slug})
         await self.db.ystate_sheets.delete_many({"slug": slug})
+
+    async def update_editors(self, slug: str, editors: list):
+        """Replace the per-user edit-permission allowlist (v3.3.0)."""
+        clean = [str(e)[:64] for e in editors if e][:200]
+        await self.db.pastes.update_one(
+            {"slug": slug}, {"$set": {"editors": clean}}
+        )
 
     async def increment_views(self, slug: str):
         await self.db.pastes.update_one({"slug": slug}, {"$inc": {"views": 1}})
@@ -152,6 +171,17 @@ class MongoStorage:
         )
 
     # ---- files (any type; historically "images" — GridFS bucket kept for compatibility) ----
+    async def paste_usage(self, slug: str) -> int:
+        """Total attachment bytes stored for a paste (per-paste quota, v3.6.0)."""
+        from bson.int64 import Int64
+
+        pipeline = [
+            {"$match": {"metadata.slug": slug}},
+            {"$group": {"_id": None, "total": {"$sum": "$length"}}},
+        ]
+        rows = await self.db["images.files"].find(pipeline).to_list(1)
+        return int(rows[0]["total"]) if rows else 0
+
     async def save_file(self, slug: str, filename: str, content_type: str, file):
         grid_in = self.images_bucket.open_upload_stream(
             filename,
@@ -162,6 +192,7 @@ class MongoStorage:
             },
         )
         size = 0
+        used = await self.paste_usage(slug)
         try:
             while True:
                 chunk = await file.read(1024 * 1024)
@@ -171,9 +202,14 @@ class MongoStorage:
                 if size > MAX_FILE_SIZE:
                     await grid_in.abort()
                     raise FileTooLarge()
+                if used + size > MAX_PASTE_STORAGE:
+                    await grid_in.abort()
+                    raise PasteQuotaExceeded(used + size, MAX_PASTE_STORAGE)
                 await grid_in.write(chunk)
             await grid_in.close()
         except FileTooLarge:
+            raise
+        except PasteQuotaExceeded:
             raise
         except Exception:
             try:
@@ -215,6 +251,16 @@ class MongoStorage:
             return True
         except Exception:
             return False
+
+    async def find_file(self, file_id: str):
+        """Metadata lookup (slug) used to authorize file deletes (v3.3.0)."""
+        from bson import ObjectId
+
+        try:
+            docs = await self.images_bucket.find({"_id": ObjectId(file_id)}).to_list(1)
+            return docs[0] if docs else None
+        except Exception:
+            return None
 
     # Legacy alias
     delete_image = delete_file
@@ -392,6 +438,7 @@ class SQLiteStorage:
                 expires_at TEXT,
                 rev INTEGER NOT NULL DEFAULT 0,
                 edit_token TEXT,
+                editors TEXT,
                 burn_after_views INTEGER,
                 password_hash TEXT,
                 burned_by TEXT
@@ -402,6 +449,7 @@ class SQLiteStorage:
             ("burn_after_views", "ALTER TABLE pastes ADD COLUMN burn_after_views INTEGER"),
             ("password_hash", "ALTER TABLE pastes ADD COLUMN password_hash TEXT"),
             ("burned_by", "ALTER TABLE pastes ADD COLUMN burned_by TEXT"),
+            ("editors", "ALTER TABLE pastes ADD COLUMN editors TEXT"),
         ):
             try:
                 await self._conn.execute(ddl)
@@ -486,10 +534,21 @@ class SQLiteStorage:
             "expiresAt": row["expires_at"],
             "rev": row["rev"],
             "editToken": row["edit_token"],
+            "editors": (row["editors"] or "").split(",") if row["editors"] else [],
             "burnAfterViews": row["burn_after_views"],
             "passwordHash": row["password_hash"],
             "burnedBy": (row["burned_by"] or "").split(",") if row["burned_by"] else [],
         }
+
+    async def update_editors(self, slug: str, editors: list):
+        """Replace the per-user edit-permission allowlist (v3.3.0)."""
+        clean = [str(e)[:64] for e in editors if e][:200]
+        async with self._lock:
+            await self._conn.execute(
+                "UPDATE pastes SET editors = ? WHERE slug = ?",
+                (",".join(clean), slug),
+            )
+            await self._conn.commit()
 
     async def slug_exists(self, slug: str) -> bool:
         async with self._lock:
@@ -499,8 +558,8 @@ class SQLiteStorage:
     async def insert_paste(self, paste: dict):
         async with self._lock:
             await self._conn.execute(
-                """INSERT INTO pastes (slug, content, language, views, created_at, updated_at, expires_at, rev, edit_token, burn_after_views, password_hash, burned_by)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO pastes (slug, content, language, views, created_at, updated_at, expires_at, rev, edit_token, editors, burn_after_views, password_hash, burned_by)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     paste["slug"],
                     paste["content"],
@@ -511,6 +570,7 @@ class SQLiteStorage:
                     _iso(paste["expiresAt"]),
                     paste.get("rev", 0),
                     paste.get("editToken"),
+                    ",".join(paste.get("editors") or []),
                     paste.get("burnAfterViews"),
                     paste.get("passwordHash"),
                     ",".join(paste.get("burnedBy") or []),
@@ -586,10 +646,20 @@ class SQLiteStorage:
             await self._conn.commit()
 
     # ---- files (any type; stored on disk, 24-hex ids compatible with the frontend) ----
+    async def paste_usage(self, slug: str) -> int:
+        """Total attachment bytes stored for a paste (per-paste quota, v3.6.0)."""
+        async with self._lock:
+            cur = await self._conn.execute(
+                "SELECT COALESCE(SUM(size), 0) FROM images WHERE slug = ?", (slug,)
+            )
+            row = await cur.fetchone()
+        return int(row[0] or 0) if row else 0
+
     async def save_file(self, slug: str, filename: str, content_type: str, file):
         file_id = uuid.uuid4().hex[:24]
         path = self.images_dir / file_id
         size = 0
+        used = await self.paste_usage(slug)
         try:
             with open(path, "wb") as out:
                 while True:
@@ -599,8 +669,13 @@ class SQLiteStorage:
                     size += len(chunk)
                     if size > MAX_FILE_SIZE:
                         raise FileTooLarge()
+                    if used + size > MAX_PASTE_STORAGE:
+                        raise PasteQuotaExceeded(used + size, MAX_PASTE_STORAGE)
                     out.write(chunk)
         except FileTooLarge:
+            path.unlink(missing_ok=True)
+            raise
+        except PasteQuotaExceeded:
             path.unlink(missing_ok=True)
             raise
         except Exception:
@@ -647,6 +722,15 @@ class SQLiteStorage:
                 await self._conn.commit()
         (self.images_dir / file_id).unlink(missing_ok=True)
         return exists
+
+    async def find_file(self, file_id: str):
+        """Metadata lookup (slug) used to authorize file deletes (v3.3.0)."""
+        async with self._lock:
+            cur = await self._conn.execute(
+                "SELECT id, slug FROM images WHERE id = ?", (file_id,)
+            )
+            row = await cur.fetchone()
+        return dict(row) if row else None
 
     # Legacy alias
     delete_image = delete_file

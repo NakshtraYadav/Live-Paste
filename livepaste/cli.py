@@ -2,12 +2,16 @@
 
     livepaste start     Run the server (local + LAN access)
     livepaste update    Update to the latest version from GitHub
+    livepaste rollback  List released versions / roll back to one
+    livepaste restart   Restart a running server (applies pending updates)
     livepaste version   Show installed version
 """
 
 import os
 import sys
 import json
+import time
+import signal
 import socket
 import argparse
 import subprocess
@@ -24,6 +28,9 @@ AUTHOR = "Nakshtra Yadav"
 DEFAULT_REPO_SLUG = "NakshtraYadav/Live-Paste"
 
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".livepaste", "config")
+HISTORY_PATH = os.path.join(os.path.expanduser("~"), ".livepaste", "history.json")
+PID_PATH = os.path.join(os.path.expanduser("~"), ".livepaste", "livepaste.pid")
+SERVER_LOG = os.path.join(os.path.expanduser("~"), ".livepaste", "server.log")
 
 # ANSI styling (disabled when stdout is not a terminal)
 if sys.stdout.isatty():
@@ -99,12 +106,89 @@ def fetch_latest_version(timeout=3, channel=None):
     return None
 
 
-def fetch_release_asset(asset_name, timeout=300):
-    """Download a release asset (follows 'latest' redirect). Returns bytes."""
+def fetch_release_asset(asset_name, timeout=300, tag=None):
+    """Download a release asset. Without `tag` follows the 'latest' redirect;
+    with `tag` (e.g. "v3.3.0") fetches that release's asset. Returns bytes."""
     slug = repo_slug()
-    url = f"https://github.com/{slug}/releases/latest/download/{asset_name}"
+    if tag:
+        url = f"https://github.com/{slug}/releases/download/{tag}/{asset_name}"
+    else:
+        url = f"https://github.com/{slug}/releases/latest/download/{asset_name}"
     with urllib.request.urlopen(url, timeout=timeout) as resp:
         return resp.read()
+
+
+def fetch_release_info(timeout=4):
+    """List recent GitHub releases: [{tag, name, date, summary}].
+
+    Powers `livepaste rollback --list` — users see every released version
+    with a one-line summary and can roll back to any of them by tag.
+    Best-effort: returns [] when offline.
+    """
+    slug = repo_slug()
+    if slug.startswith("CHANGE_ME"):
+        return []
+    url = f"https://api.github.com/repos/{slug}/releases?per_page=20"
+    try:
+        req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.load(resp)
+        out = []
+        for rel in data:
+            body = (rel.get("body") or "").strip()
+            summary = next((ln.strip().lstrip("#- *") for ln in body.splitlines() if ln.strip()), "")
+            out.append(
+                {
+                    "tag": rel.get("tag_name") or "",
+                    "name": rel.get("name") or "",
+                    "date": (rel.get("published_at") or "")[:10],
+                    "summary": summary[:110],
+                }
+            )
+        return out
+    except Exception:
+        return []
+
+
+# ---------------- version history ledger (v3.5.0) ----------------
+def load_history():
+    try:
+        with open(HISTORY_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def record_history(version, action, summary="", tag=None):
+    """Append a version-change entry: updates, rollbacks and installs.
+
+    The ledger is what `livepaste rollback --list` shows for versions that
+    were actually run on this machine, merged with the GitHub release list.
+    """
+    entry = {
+        "version": str(version),
+        "tag": tag or (f"v{version}" if version else None),
+        "action": action,  # update | rollback | install
+        "summary": (summary or "")[:160],
+        "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    try:
+        hist = load_history()
+        hist.insert(0, entry)
+        os.makedirs(os.path.dirname(HISTORY_PATH), exist_ok=True)
+        with open(HISTORY_PATH, "w") as f:
+            json.dump(hist[:200], f, indent=1)
+    except Exception:
+        pass  # the ledger must never break an update
+    return entry
+
+
+def release_summary_for(version):
+    """One-line summary for a version from its GitHub release notes."""
+    for rel in fetch_release_info():
+        if rel["tag"] in (f"v{version}", str(version)):
+            return rel["summary"]
+    return ""
 
 
 def _print_progress(count, block_size, total):
@@ -115,7 +199,7 @@ def _print_progress(count, block_size, total):
         sys.stdout.flush()
 
 
-def verify_checksum(data, asset_name, channel=None):
+def verify_checksum(data, asset_name, channel=None, tag=None):
     """Verify SHA256 against the release's SHA256SUMS file.
 
     Returns True when verified, False on mismatch, None when no checksum file
@@ -124,7 +208,7 @@ def verify_checksum(data, asset_name, channel=None):
     import hashlib
 
     try:
-        sums = fetch_release_asset("SHA256SUMS", timeout=30)
+        sums = fetch_release_asset("SHA256SUMS", timeout=30, tag=tag)
     except Exception:
         print("  ⚠  No SHA256SUMS published for this release — skipping verification")
         return None
@@ -250,46 +334,89 @@ def binary_asset_name():
     return None
 
 
-def _update_binary(latest, channel=None, assume_yes=False):
-    """Self-update a standalone binary from the latest GitHub release."""
+def _staged_update_path():
+    """Marker file naming a downloaded update waiting to be applied on restart."""
+    return os.path.join(os.path.expanduser("~"), ".livepaste", "staged_update.json")
+
+
+def mark_pending_restart(version, action="update", summary=""):
+    """Remember that a new binary is on disk and the server should restart."""
+    try:
+        os.makedirs(os.path.dirname(_staged_update_path()), exist_ok=True)
+        with open(_staged_update_path(), "w") as f:
+            json.dump({"version": str(version), "action": action, "summary": (summary or "")[:160], "ts": time.time()}, f)
+    except Exception:
+        pass
+
+
+def pop_pending_restart():
+    try:
+        with open(_staged_update_path()) as f:
+            info = json.load(f)
+        os.unlink(_staged_update_path())
+        return info
+    except Exception:
+        return None
+
+
+def _write_binary(target, data):
+    """Atomically replace the binary at `target` with `data`."""
     import stat
     import tempfile
 
-    asset = binary_asset_name()
-    if not asset:
-        print("✗ No prebuilt binary for this platform. Reinstall from GitHub instead.")
-        sys.exit(1)
-    target = os.path.realpath(sys.executable)
-    if not assume_yes:
-        answer = input(f"Update to v{latest or 'latest'}? [Y/n] ").strip().lower()
-        if answer and answer not in ("y", "yes"):
-            print("Update cancelled.")
-            return
-    print(f"  Downloading v{latest or 'latest'} …")
-    try:
-        data = fetch_release_asset(asset)
-    except Exception as e:
-        print(f"\n✗ Download failed: {e}")
-        sys.exit(1)
-    verdict = verify_checksum(data, asset, channel)
-    if verdict is False:
-        sys.exit(1)
-    backup_binary(target)
     tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(target), prefix=".livepaste-new-")
     try:
         with os.fdopen(tmp_fd, "wb") as f:
             f.write(data)
         os.chmod(tmp_path, os.stat(tmp_path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         os.replace(tmp_path, target)
-    except Exception as e:
+    except Exception:
         try:
             os.unlink(tmp_path)
         except OSError:
             pass
+        raise
+
+
+def _update_binary(latest, channel=None, assume_yes=False, tag=None):
+    """Self-update a standalone binary from a GitHub release.
+
+    With `tag` (e.g. "v3.3.0") installs that exact release; otherwise latest.
+    Records the change in the version ledger and marks a pending restart so a
+    running server can pick it up automatically.
+    """
+    asset = binary_asset_name()
+    if not asset:
+        print("✗ No prebuilt binary for this platform. Reinstall from GitHub instead.")
+        sys.exit(1)
+    target = os.path.realpath(sys.executable)
+    label = tag or latest or "latest"
+    if not assume_yes:
+        answer = input(f"Update to v{label} ? [Y/n] ".replace("vlatest", "latest")).strip().lower()
+        if answer and answer not in ("y", "yes"):
+            print("Update cancelled.")
+            return
+    print(f"  Downloading v{label} …")
+    try:
+        data = fetch_release_asset(asset, tag=tag)
+    except Exception as e:
+        print(f"\n✗ Download failed: {e}")
+        sys.exit(1)
+    verdict = verify_checksum(data, asset, channel, tag=tag)
+    if verdict is False:
+        sys.exit(1)
+    backup_binary(target)
+    try:
+        _write_binary(target, data)
+    except Exception as e:
         print(f"✗ Could not replace the binary: {e}")
         sys.exit(1)
-    print(f"✓ Updated to v{latest or 'latest'}. Previous version kept at {os.path.basename(target)}.old")
-    print("  Restart `livepaste start` to use it. Roll back anytime: livepaste rollback")
+    version = (tag or latest or "").lstrip("v")
+    record_history(version, "update", summary=release_summary_for(version), tag=tag)
+    mark_pending_restart(version, "update", release_summary_for(version))
+    print(f"✓ Updated to v{version or label}. Previous version kept at {os.path.basename(target)}.old")
+    print("  Restart `livepaste start` to use it — or run: livepaste restart")
+    print("  Roll back anytime: livepaste rollback (add --list to see versions)")
 
 
 def cmd_update(args):
@@ -325,21 +452,64 @@ def cmd_update(args):
         [sys.executable, "-m", "pip", "install", "--upgrade", "--quiet", target]
     )
     if result.returncode == 0:
-        print(f"✓ Updated successfully{f' to v{latest}' if latest else ''}. Restart `livepaste start` to use it.")
+        mark_pending_restart(latest or "?", "update", release_summary_for(latest or ""))
+        print(f"✓ Updated successfully{f' to v{latest}' if latest else ''}. Restart `livepaste start` to use it — or run: livepaste restart")
     else:
         print("✗ Update failed — see pip output above.")
         sys.exit(result.returncode)
 
 
 def cmd_rollback(args):
+    """Roll back to a previous version.
+
+    - `livepaste rollback`          → restore the .old binary (instant, offline)
+    - `livepaste rollback --list`   → show released versions with summaries
+    - `livepaste rollback v3.3.0`   → download + verify + install that exact tag
+    """
     if not is_frozen():
         print("Rollback is for standalone binary installs. pip users: reinstall a pinned version:")
         print(f'  pip install "git+https://github.com/{repo_slug()}.git@v<version>"')
         sys.exit(1)
     target = os.path.realpath(sys.executable)
+
+    # --list: merge the machine's version ledger with GitHub releases
+    if getattr(args, "list", False):
+        print(f"  {BOLD}Released versions{RESET}  {DIM}({repo_slug()}){RESET}")
+        hist = {h["version"]: h for h in load_history()}
+        for rel in fetch_release_info():
+            tag = rel["tag"]
+            ver = tag.lstrip("v")
+            ran = hist.get(ver)
+            marker = ""
+            if ver == __version__:
+                marker = f"  {GREEN}← running{RESET}"
+            elif ran:
+                marker = f"  {DIM}(was installed {ran['ts']}){RESET}"
+            print(f"  {BOLD}{tag}{RESET}  {DIM}{rel['date']}{RESET}{marker}")
+            if rel["summary"]:
+                print(f"      {rel['summary']}")
+        return
+
+    # rollback to a specific tag → same path as an update, but pinning the tag
+    if getattr(args, "tag", None):
+        tag = args.tag if args.tag.startswith("v") else f"v{args.tag}"
+        current = f"v{__version__}"
+        if tag == current:
+            print(f"Already running {tag}.")
+            return
+        _update_binary(None, assume_yes=args.yes, tag=tag)
+        record_history(__version__, "rollback", summary=f"rolled back from {tag}")
+        if args.restart:
+            cmd_restart(args)
+        return
+
+    # classic .old swap — instant and offline
     old = f"{target}.old"
     if not os.path.exists(old):
-        print("No previous version found (nothing rolled back yet).")
+        print("No previous version found next to the binary.")
+        print("Install a specific released version instead:")
+        print("  livepaste rollback --list            # see versions")
+        print("  livepaste rollback v3.3.0            # install that tag")
         sys.exit(1)
     import shutil
     import tempfile
@@ -350,7 +520,143 @@ def cmd_rollback(args):
     os.chmod(tmp_path, os.stat(old).st_mode)
     os.replace(tmp_path, target)
     os.remove(old)
-    print("✓ Rolled back to the previous version. Restart `livepaste start`.")
+    record_history(__version__, "rollback", summary="restored .old binary")
+    mark_pending_restart(__version__, "rollback", "restored previous binary")
+    print("✓ Rolled back to the previous version. Restart `livepaste start` — or run: livepaste restart")
+
+
+def _pid_is_livepaste(pid):
+    """True when `pid` is (still) a LivePaste process — guards against pid reuse."""
+    try:
+        out = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+        return "livepaste" in out or "uvicorn" in out
+    except Exception:
+        return False
+
+
+def cmd_restart(args):
+    """Restart the LivePaste server — applying any staged update/rollback.
+
+    Works by locating the running server via its pid file (or a port probe),
+    sending SIGTERM, waiting for the port to free, then relaunching detached
+    with the same data dir and port. Auto-applies staged updates: if a marker
+    file exists (written by update/rollback), the restart happens silently.
+    """
+    cfg = read_config()
+    pending = pop_pending_restart()
+    if pending:
+        print(f"  Applying {pending.get('action')} to v{pending.get('version')} — restarting…")
+
+    # Find the running server
+    pid = None
+    try:
+        with open(PID_PATH) as f:
+            pid = int(f.read().strip())
+        os.kill(pid, 0)
+    except Exception:
+        pid = None
+    # An explicit --port wins over the config file (a stale config value must
+    # not send the restart to the wrong port).
+    port = int(getattr(args, "port", None) or cfg.get("PORT") or 8000)
+    # v3.5.1: never kill a recycled pid — verify it really is LivePaste
+    # (pid files go stale; the OS hands the pid to an unrelated process).
+    if pid and not _pid_is_livepaste(pid):
+        pid = None
+
+    stopped = False
+    if pid:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            for _ in range(50):
+                try:
+                    os.kill(pid, 0)
+                    time.sleep(0.1)
+                except OSError:
+                    break
+            stopped = True
+        except OSError:
+            pid = None
+    if not stopped:
+        # Last resort: probe the port and free it
+        import subprocess as _sp
+        try:
+            out = _sp.run(["lsof", "-ti", f":{port}"], capture_output=True, text=True, timeout=5).stdout
+            pids = [int(p) for p in out.split() if p.isdigit()]
+            for p in pids:
+                os.kill(p, signal.SIGTERM)
+            if pids:
+                time.sleep(0.8)
+            stopped = bool(pids)
+        except Exception:
+            pass
+    if not stopped and not pending:
+        print("No running server found (nothing to restart). Start one: livepaste start")
+        return
+
+    # Relaunch detached: same interpreter/binary, same data dir, same port
+    data_dir = cfg.get("DATA_DIR") or os.environ.get("LIVEPASTE_DATA_DIR") or os.path.join(os.path.expanduser("~"), ".livepaste", "data")
+    os.makedirs(data_dir, exist_ok=True)
+    env = dict(os.environ, LIVEPASTE_DATA_DIR=data_dir)
+    if not os.environ.get("MONGO_URL") and cfg.get("KEEP_DATA") != "1":
+        env["LIVEPASTE_EPHEMERAL"] = "1"
+    exe = sys.executable
+    # v3.5.0: run from THIS checkout — `-m livepaste` with just the interpreter
+    # can resolve a DIFFERENT installed livepaste (e.g. a system-wide 2.1.1)
+    # instead of the repo code. Seeding PYTHONPATH with this repo's root (and
+    # its src/ layout if present) pins the relaunch to the same code running now.
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    py_path = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (repo_root, py_path) if p)
+    frozen = is_frozen()
+    if frozen:
+        cmd = [exe, "start", "--port", str(port), "--no-update-check"]
+    else:
+        # v3.5.1: launch uvicorn directly instead of `-m livepaste`.
+        # Rationale: `python -m livepaste` can resolve a *different* installed
+        # copy of the package depending on macOS launcher quirks (framework
+        # Python.app stub, system site-packages, stale dist-info) — we observed
+        # it booting v2.1.1 from a production venv while the repo held v3.4.0.
+        # `uvicorn livepaste.core:app` with cwd + PYTHONPATH pinned to this
+        # checkout is deterministic: the repo package always wins.
+        cmd = [
+            exe, "-m", "uvicorn", "livepaste.core:app",
+            "--host", "0.0.0.0",
+            "--port", str(port),
+            "--log-level", "warning",
+        ]
+    log = open(SERVER_LOG, "ab", 0)
+    kwargs = {}
+    if os.name == "posix":
+        kwargs["start_new_session"] = True
+        kwargs["cwd"] = repo_root
+    proc = subprocess.Popen(
+        cmd,
+        stdout=log,
+        stderr=log,
+        stdin=subprocess.DEVNULL,
+        env=env,
+        **kwargs,
+    )
+    try:
+        os.makedirs(os.path.dirname(PID_PATH), exist_ok=True)
+        with open(PID_PATH, "w") as f:
+            f.write(str(proc.pid))
+    except Exception:
+        pass
+    # Wait for the new server to answer
+    for _ in range(100):
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1) as resp:
+                if resp.status == 200:
+                    break
+        except Exception:
+            time.sleep(0.2)
+    print(f"✓ Server restarted on port {port} (pid {proc.pid}) — now running v{__version__}")
+    if pending:
+        print(f"  {pending.get('action')} applied: v{pending.get('version')}")
 
 
 def _auto_update_watchdog():
@@ -389,6 +695,7 @@ def _auto_update_watchdog():
         with open(marker, "w") as f:
             f.write(latest)
         print(f"  ⬆  Auto-updated to v{latest} — takes effect on next restart.")
+        mark_pending_restart(latest, "update", release_summary_for(latest))
     except Exception:
         pass  # auto-update must never break startup
 
@@ -485,8 +792,16 @@ def main():
     p_update.add_argument("-y", "--yes", action="store_true", help="Assume yes; skip the confirmation prompt")
     p_update.set_defaults(func=cmd_update)
 
-    p_rollback = sub.add_parser("rollback", help="Restore the previous binary version")
+    p_rollback = sub.add_parser("rollback", help="Roll back to a previous version (.old binary or a tagged release)")
+    p_rollback.add_argument("tag", nargs="?", default=None, help="Install a specific released version, e.g. v3.3.0")
+    p_rollback.add_argument("--list", action="store_true", help="List released versions with summaries")
+    p_rollback.add_argument("-y", "--yes", action="store_true", help="Assume yes; skip the confirmation prompt")
+    p_rollback.add_argument("--restart", action="store_true", help="Restart the server after rolling back")
     p_rollback.set_defaults(func=cmd_rollback)
+
+    p_restart = sub.add_parser("restart", help="Restart the server, applying any pending update/rollback")
+    p_restart.add_argument("--port", type=int, default=None, help="Port to restart on (default: configured or 8090)")
+    p_restart.set_defaults(func=cmd_restart)
 
     p_config = sub.add_parser("config", help="View or change settings (port, data-dir, keep-data)")
     p_config.add_argument("key", nargs="?", help="Setting name: port | data-dir | keep-data | repo")
@@ -504,6 +819,13 @@ def main():
     if not args.command:
         parser.print_help()
         sys.exit(0)
+    # Auto-restart marker: when `start` launches and an update/rollback was
+    # staged (e.g. by `livepaste update` or the auto-update watchdog), apply it
+    # immediately instead of asking the user to restart manually.
+    if args.command == "start":
+        pending = pop_pending_restart()
+        if pending:
+            print(f"  ⬆  Applying {pending.get('action')} to v{pending.get('version')} — {pending.get('summary') or 'staged update'}")
     args.func(args)
 
 

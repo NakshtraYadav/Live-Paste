@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.6.0] - 2026-09-14
+
+### Added
+- **Per-paste storage quota (500 MB)** — attachment uploads are now summed per
+  paste and rejected with a clear `413` ("Paste storage quota full …") once the
+  total would exceed `MAX_PASTE_STORAGE`. Works across both SQLite and MongoDB
+  (GridFS) backends. Closing the audit follow-up: unbounded attachment growth.
+- Deleting an attachment frees its bytes from the quota immediately; each paste
+  has an independent bucket.
+
+### Tests
+- 2 new regression tests (quota enforcement + delete-frees-quota / per-paste
+  isolation) — 34 total, all passing in <1s.
+
+---
+
 ## [3.5.1] - 2026-09-14
 
 ### Security

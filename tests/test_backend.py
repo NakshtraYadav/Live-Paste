@@ -185,6 +185,7 @@ def test_any_file_roundtrip(client, name, ctype, body):
     res = client.post(
         f"/api/paste/{p['slug']}/file",
         files={"file": (name, body, ctype)},
+        data={"editToken": p["editToken"]},
     )
     assert res.status_code == 200, res.text
     fid = res.json()["id"]
@@ -200,6 +201,7 @@ def test_path_style_filename_flattened(client):
     res = client.post(
         f"/api/paste/{p['slug']}/file",
         files={"file": ("../../etc/passwd", b"x", "application/octet-stream")},
+        data={"editToken": p["editToken"]},
     )
     assert res.status_code == 200
     assert res.json()["name"] == "passwd"
@@ -210,8 +212,89 @@ def test_legacy_image_endpoint_still_image_only(client):
     r = client.post(
         f"/api/paste/{p['slug']}/image",
         files={"file": ("notes.txt", b"hello", "text/plain")},
+        data={"editToken": p["editToken"]},
     )
     assert r.status_code == 400
+
+
+def test_locked_paste_cannot_leak_via_sheets_or_revisions(client):
+    """v3.5.1 regression: password-gated pastes leaked content through
+    GET /sheets/{id} and GET /revisions/{rev} (no pw check)."""
+    p = _create(client, content="SECRET BODY", password="pw123")
+    slug = p["slug"]
+
+    # main sheet without pw → 401; with pw → content served
+    r = client.get(f"/api/paste/{slug}/sheets/main")
+    assert r.status_code == 401
+    r = client.get(f"/api/paste/{slug}/sheets/main?pw=pw123")
+    assert r.status_code == 200
+    assert r.json()["content"] == "SECRET BODY"
+
+    # revision content is paste content — must be gated too (401 before 404,
+    # so probing for revisions can't distinguish existing from missing ones)
+    r = client.get(f"/api/paste/{slug}/revisions/1")
+    assert r.status_code in (401, 404)
+    r = client.get(f"/api/paste/{slug}/revisions/1?pw=pw123")
+    # gate releases (404 here = revision does not exist on a never-edited paste;
+    # 200 would be served if it did — never 401)
+    assert r.status_code in (200, 404)
+
+    # plain GET still honors the lock (baseline)
+    assert client.get(f"/api/paste/{slug}").status_code == 401
+    assert client.get(f"/api/paste/{slug}?pw=pw123").status_code == 200
+
+
+def test_upload_requires_edit_rights(client):
+    """v3.3.0: uploads/deletes are server-side token-gated now."""
+    p = _create(client, content="guard")
+    slug, token = p["slug"], p["editToken"]
+
+    no_tok = client.post(
+        f"/api/paste/{slug}/file",
+        files={"file": ("a.txt", b"x", "text/plain")},
+    )
+    assert no_tok.status_code == 403
+    bad_tok = client.post(
+        f"/api/paste/{slug}/file",
+        files={"file": ("a.txt", b"x", "text/plain")},
+        data={"editToken": "wrong"},
+    )
+    assert bad_tok.status_code == 403
+
+    # granted editors CAN upload
+    ok = client.post(
+        f"/api/paste/{slug}/file",
+        files={"file": ("a.txt", b"x", "text/plain")},
+        data={"clientId": "peer-1"},
+    )
+    assert ok.status_code == 403  # not granted yet
+    ws = client.websocket_connect(f"/api/ws/{slug}?token={token}&clientId=owner")
+    ws.__enter__()
+    ws.send_json({"type": "grant-edit", "clientId": "peer-1"})
+    ws.send_json({"type": "ping"})
+    seen = set()
+    for _ in range(10):
+        m = ws.receive_json()
+        seen.add(m.get("type"))
+        if m.get("type") == "editors" or (seen >= {"init"} and m.get("type") == "pong"):
+            break
+    assert "editors" in seen
+    ws.__exit__(None, None, None)
+    ok2 = client.post(
+        f"/api/paste/{slug}/file",
+        files={"file": ("a.txt", b"x", "text/plain")},
+        data={"clientId": "peer-1"},
+    )
+    assert ok2.status_code == 200, ok2.text
+    fid = ok2.json()["id"]
+
+    # unauthenticated delete is refused
+    del_no = client.delete(f"/api/file/{fid}")
+    assert del_no.status_code == 403
+    del_bad = client.delete(f"/api/file/{fid}?editToken=wrong")
+    assert del_bad.status_code == 403
+    del_ok = client.delete(f"/api/file/{fid}?editToken={token}")
+    assert del_ok.status_code == 200
 
 
 # ---------------- sheets (multiple pages) ----------------
@@ -475,3 +558,91 @@ def test_unlocked_paste_password_endpoint_unlimited(client):
     for _ in range(12):
         res = client.post(f"/api/paste/{p['slug']}/password", json={"password": "whatever"})
         assert res.status_code == 200 and res.json() == {"ok": True, "locked": False}
+
+
+# ---------------- v3.6.0: per-paste storage quota ----------------
+
+def test_paste_storage_quota_enforced(client):
+    """v3.6.0: a paste whose attachments exceed the (tiny, patched) quota
+    rejects further uploads with a 413 naming the quota."""
+    import livepaste.storage as st
+
+    p = _create(client, content="quota")
+    slug, token = p["slug"], p["editToken"]
+
+    real = st.MAX_PASTE_STORAGE
+    st.MAX_PASTE_STORAGE = 300  # bytes — tiny on purpose
+    try:
+        ok = client.post(
+            f"/api/paste/{slug}/file",
+            files={"file": ("f1.bin", b"a" * 100, "application/octet-stream")},
+            data={"editToken": token},
+        )
+        assert ok.status_code == 200, ok.text
+        full = client.post(
+            f"/api/paste/{slug}/file",
+            files={"file": ("f2.bin", b"b" * 250, "application/octet-stream")},
+            data={"editToken": token},
+        )
+        assert full.status_code == 413
+        assert "quota" in full.json()["detail"].lower()
+    finally:
+        st.MAX_PASTE_STORAGE = real
+
+
+def test_paste_quota_frees_on_delete_and_is_per_paste(client):
+    """v3.6.0: deleting an attachment frees quota; each paste has its own bucket."""
+    import livepaste.storage as st
+
+    p = _create(client, content="quota-free")
+    slug, token = p["slug"], p["editToken"]
+
+    real = st.MAX_PASTE_STORAGE
+    st.MAX_PASTE_STORAGE = 300
+    try:
+        r1 = client.post(
+            f"/api/paste/{slug}/file",
+            files={"file": ("f1.bin", b"a" * 100, "application/octet-stream")},
+            data={"editToken": token},
+        )
+        assert r1.status_code == 200
+        file_id = r1.json()["id"]
+
+        # 100 used -> 150 more fits, but another 250 does not
+        r2 = client.post(
+            f"/api/paste/{slug}/file",
+            files={"file": ("f2.bin", b"b" * 150, "application/octet-stream")},
+            data={"editToken": token},
+        )
+        assert r2.status_code == 200
+        assert (
+            client.post(
+                f"/api/paste/{slug}/file",
+                files={"file": ("f3.bin", b"c" * 250, "application/octet-stream")},
+                data={"editToken": token},
+            ).status_code
+            == 413
+        )
+
+        # Deleting both attachments frees the bucket -> 250 fits again
+        assert client.delete(f"/api/file/{file_id}", params={"editToken": token}).status_code == 200
+        assert client.delete(f"/api/file/{r2.json()['id']}", params={"editToken": token}).status_code == 200
+        assert (
+            client.post(
+                f"/api/paste/{slug}/file",
+                files={"file": ("f4.bin", b"d" * 250, "application/octet-stream")},
+                data={"editToken": token},
+            ).status_code
+            == 200
+        )
+
+        # A different paste has an untouched bucket
+        other = _create(client, content="other")
+        ok = client.post(
+            f"/api/paste/{other['slug']}/file",
+            files={"file": ("g.bin", b"z" * 290, "application/octet-stream")},
+            data={"editToken": other["editToken"]},
+        )
+        assert ok.status_code == 200
+    finally:
+        st.MAX_PASTE_STORAGE = real
