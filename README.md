@@ -308,17 +308,28 @@ LIVEPASTE_DATA_DIR=/tmp/lp-live ./.venv/bin/uvicorn livepaste.core:app --port 80
 
 ## Releasing a new version
 
-1. Bump `VERSION`, add a `CHANGELOG.md` entry, update `README.md` where behavior changed
+**From v3.16.1 on, every version bump is released** — tags, standalone binaries, and GitHub Releases all ship together so rollback history keeps growing. The whole ritual is one command:
+
+```bash
+./scripts/release.sh --preflight   # checks only (changelog ↔ version ↔ tests ↔ bundle)
+./scripts/release.sh --dry-run     # everything except commit/tag/push
+./scripts/release.sh               # full: commit → tag v<VERSION> → push → verify workflow
+```
+
+The script refuses to release unless: the `CHANGELOG.md` top entry matches `VERSION`, the 44-test suite is green, and the bundled frontend is current. After pushing the tag it polls the **Build & Release binaries** workflow and reports whether binaries + SHA256SUMS were published.
+
+Manual equivalent:
+
+1. Bump `VERSION`, add a `CHANGELOG.md` entry (top section must match), update `README.md` where behavior changed
 2. Rebuild the bundled frontend so installs ship the latest UI:
    ```bash
    cd frontend && VITE_BACKEND_URL="" yarn build
    rm -rf ../livepaste/static && cp -r build ../livepaste/static
    ```
-3. Bump `CACHE_VERSION` in `frontend/public/sw.js` (same release ritual as the version bump) — or installed PWAs keep serving the old shell
-4. Push to GitHub — every installed copy will see the update notice on next start
-5. **For standalone binaries:** tag the release — GitHub Actions builds macOS (arm64 + Intel) and Linux (x86_64 + arm64) executables, generates `SHA256SUMS`, and publishes the Release automatically:
+3. Bump `CACHE_VERSION` in `frontend/public/sw.js` — or installed PWAs keep serving the old shell
+4. Commit, tag, and push — the release workflow builds macOS (arm64 + Intel) and Linux (x86_64 + arm64) executables, generates `SHA256SUMS`, and publishes the GitHub Release automatically:
    ```bash
-   git tag v3.15.0 && git push origin v3.15.0
+   git tag v3.17.0 && git push origin main v3.17.0
    ```
 
 ## How it works

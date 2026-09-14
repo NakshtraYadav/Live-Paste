@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.16.2] - 2026-09-14
+
+### Added
+- **Release ritual (`scripts/release.sh`)** — every version bump is now
+  released, not just committed: the script enforces changelog ↔ version
+  alignment and green tests, refreshes the bundle check, commits, tags
+  `v<VERSION>`, pushes, then polls the **Build & Release binaries** workflow
+  and reports whether standalone binaries + SHA256SUMS published. Modes:
+  `--preflight` (checks only), `--dry-run` (everything but git), full.
+  When the dev workspace has no git remote, git work automatically delegates
+  to the push clone. This makes tags + releases + binary history mandatory
+  for every future version bump.
+
+---
+
 ## [3.16.1] - 2026-09-14
 
 ### Changed
