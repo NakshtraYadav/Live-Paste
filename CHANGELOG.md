@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.8.0] - 2026-09-14
+
+### Added
+- **Duplicate page** — hover a page tab and click the copy icon: the page is
+  duplicated (name → "… copy", content, language, and the full CRDT history)
+  and inserted right after the source. Works for "Page 1" too.
+- New endpoint `POST /api/paste/{slug}/sheets/{sheet_id}/duplicate`.
+
+### Tests
+- 2 duplicate regression tests — 40 total.
+
+---
+
 ## [3.7.0] - 2026-09-14
 
 ### Added

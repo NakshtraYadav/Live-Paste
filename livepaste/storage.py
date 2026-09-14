@@ -401,9 +401,16 @@ class MongoStorage:
     async def clear_sheet_ystate(self, slug: str, sheet_id: str):
         await self.db.ystate_sheets.delete_one({"slug": slug, "sheetId": sheet_id})
 
-    async def purge_expired(self):
-        # Mongo TTL index handles paste expiry; purge orphaned files lazily.
-        return
+    async def copy_sheet_ystate(self, slug: str, src_sheet_id: str, dst_sheet_id: str):
+        """Duplicate a sheet's CRDT history (v3.8.0)."""
+        await self.clear_sheet_ystate(slug, dst_sheet_id)
+        src = await self.db.ystate_sheets.find_one(
+            {"slug": slug, "sheetId": src_sheet_id}
+        )
+        if src and src.get("updates"):
+            await self.db.ystate_sheets.insert_one(
+                {"slug": slug, "sheetId": dst_sheet_id, "updates": list(src["updates"])}
+            )
 
     # ---- revisions (Mongo: capped child docs) ----
     async def append_revision(self, slug: str, content: str, updated_at) -> int:
@@ -1024,6 +1031,20 @@ class SQLiteStorage:
         async with self._lock:
             await self._conn.execute(
                 "DELETE FROM ystate_sheets WHERE slug = ? AND sheet_id = ?", (slug, sheet_id)
+            )
+            await self._conn.commit()
+
+    async def copy_sheet_ystate(self, slug: str, src_sheet_id: str, dst_sheet_id: str):
+        """Duplicate a sheet's CRDT history (v3.8.0)."""
+        async with self._lock:
+            await self._conn.execute(
+                "DELETE FROM ystate_sheets WHERE slug = ? AND sheet_id = ?", (slug, dst_sheet_id)
+            )
+            await self._conn.execute(
+                '''INSERT INTO ystate_sheets (slug, sheet_id, idx, "update")
+                   SELECT slug, ?, idx, "update" FROM ystate_sheets
+                   WHERE slug = ? AND sheet_id = ? ORDER BY idx ASC''',
+                (dst_sheet_id, slug, src_sheet_id),
             )
             await self._conn.commit()
 

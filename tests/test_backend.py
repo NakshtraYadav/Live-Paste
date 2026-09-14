@@ -737,3 +737,60 @@ def test_fork_custom_slug_and_collisions(client):
         ).status_code
         == 400
     )
+
+
+# ---------------- v3.8.0: duplicate page ----------------
+
+
+def test_duplicate_sheet_copies_content_and_state(client):
+    p = _create(client, content="main text")
+    slug, token = p["slug"], p["editToken"]
+    made = client.post(
+        f"/api/paste/{slug}/sheets",
+        json={"editToken": token, "name": "Research", "content": "sheet body"},
+    ).json()
+
+    dup = client.post(
+        f"/api/paste/{slug}/sheets/{made['sheetId']}/duplicate",
+        json={"editToken": token},
+    )
+    assert dup.status_code == 200, dup.text
+    d = dup.json()
+    assert d["name"] == "Research copy"
+
+    got = client.get(f"/api/paste/{slug}/sheets/{d['sheetId']}").json()
+    assert got["content"] == "sheet body"
+    assert got["language"] == "plaintext"
+
+    # Duplicate of main copies the paste's main content
+    dm = client.post(
+        f"/api/paste/{slug}/sheets/main/duplicate", json={"editToken": token}
+    ).json()
+    got_main = client.get(f"/api/paste/{slug}/sheets/{dm['sheetId']}").json()
+    assert got_main["content"] == "main text"
+
+
+def test_duplicate_sheet_requires_edit_and_names_deconflict(client):
+    p = _create(client, content="x")
+    slug, token = p["slug"], p["editToken"]
+    made = client.post(
+        f"/api/paste/{slug}/sheets",
+        json={"editToken": token, "name": "Solo", "content": "abc"},
+    ).json()
+    # Read-only callers cannot duplicate
+    assert (
+        client.post(
+            f"/api/paste/{slug}/sheets/{made['sheetId']}/duplicate", json={"editToken": "bad"}
+        ).status_code
+        == 403
+    )
+    # Duplicate twice -> unique names
+    d1 = client.post(
+        f"/api/paste/{slug}/sheets/{made['sheetId']}/duplicate", json={"editToken": token}
+    ).json()
+    d2 = client.post(
+        f"/api/paste/{slug}/sheets/{made['sheetId']}/duplicate", json={"editToken": token}
+    ).json()
+    assert d1["name"] != d2["name"]
+    names = {s["name"] for s in client.get(f"/api/paste/{slug}/sheets").json()["sheets"]}
+    assert d1["name"] in names and d2["name"] in names

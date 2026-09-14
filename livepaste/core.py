@@ -744,6 +744,59 @@ async def update_sheet(slug: str, sheet_id: str, body: SheetUpdateBody):
     return {"sheetId": sheet_id, "name": sheet["name"], "language": sheet["language"]}
 
 
+@api_router.post("/paste/{slug}/sheets/{sheet_id}/duplicate")
+async def duplicate_sheet(slug: str, sheet_id: str, body: SheetUpdateBody):
+    """Duplicate a page — copy, name, language, content AND CRDT history
+    (v3.8.0). The copy is inserted right after the source page."""
+    paste = await get_paste_doc(slug)
+    if not paste:
+        raise HTTPException(status_code=404, detail="Paste not found or expired")
+    require_edit_token(paste, body.editToken)
+    if await storage.count_sheets(slug) >= MAX_SHEETS_PER_PASTE:
+        raise HTTPException(status_code=400, detail=f"Too many sheets (max {MAX_SHEETS_PER_PASTE})")
+
+    if sheet_id == "main":
+        src = {"name": "Page 1", "content": paste["content"], "language": paste["language"], "position": 0}
+    else:
+        src = await storage.get_sheet(slug, sheet_id)
+        if not src:
+            raise HTTPException(status_code=404, detail="Sheet not found")
+    if len(src.get("content", "")) > MAX_CONTENT_SIZE:
+        raise HTTPException(status_code=413, detail="Source page too large to duplicate")
+
+    new_id = secrets.token_hex(6)
+    existing = await storage.list_sheets(slug)
+    # Insert directly after the source's position
+    after = src.get("position", 0)
+    # Positions may need compaction: shift everything below `after` down by 1
+    all_positions = sorted(s.get("position", 0) for s in existing)
+    def _next_free_pos():
+        pos = after + 1
+        while pos in all_positions:
+            pos += 1
+        return pos
+    new_pos = _next_free_pos()
+
+    base_name = _clean_sheet_name(f"{src['name']} copy", "Page copy")
+    taken = {s["name"].lower() for s in existing}
+    name = base_name
+    n = 2
+    while name.lower() in taken:
+        name = f"{base_name} {n}"
+        n += 1
+
+    await storage.insert_sheet(
+        slug, new_id, name, src.get("content", ""), src.get("language", "plaintext"),
+        new_pos, now_utc(),
+    )
+    await storage.copy_sheet_ystate(slug, sheet_id, new_id)
+    await manager.broadcast(
+        slug,
+        {"type": "sheets-changed", "action": "created", "sheetId": new_id, "name": name},
+    )
+    return {"sheetId": new_id, "name": name, "position": new_pos}
+
+
 @api_router.delete("/paste/{slug}/sheets/{sheet_id}")
 async def delete_sheet(slug: str, sheet_id: str, editToken: str = ""):
     paste = await get_paste_doc(slug)
