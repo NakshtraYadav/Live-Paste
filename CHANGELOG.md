@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.14.0] - 2026-09-14
+
+### Added
+- **Command palette** — `Ctrl/Cmd+K` (or `⌘P`) opens a searchable palette with
+  every page, edit, view and share action: add/duplicate pages, find &
+  replace, markdown/HTML preview, history, copy links, fork. Context-aware —
+  editor-only actions disappear for read-only viewers.
+
+---
+
 ## [3.13.0] - 2026-09-14
 
 ### Added
