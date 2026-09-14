@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.15.1] - 2026-09-14
+
+### Fixed
+- **Edit grants never took effect server-side (critical):** each WebSocket
+  handler captured `can_edit` once at handshake, so after an owner clicked a
+  peer's avatar → *Grant edit*, the peer's UI unlocked but the server kept
+  rejecting every `edit`/`yupdate` with `read_only`; revocation was equally
+  ignored by already-connected sockets. Socket auth (token + clientId) is now
+  carried on the connection and `RoomManager.apply_editor_list` recomputes
+  rights for **every** socket in the room the moment the allowlist changes —
+  grants apply live, revocations kick in live, and the editors room set stays
+  in sync.
+- **View counter inflated on every refresh:** `register_view` incremented on
+  each WebSocket join and each `?count_view=1` REST call — reloading the tab
+  (or any reconnect) added +1 forever, in the UI badge and the stored total.
+  Views are now **unique-viewer** counts: a per-paste `viewers` set (client
+  ids, capped at 2000, SQLite column auto-migrated) dedupes across both
+  paths; anonymous (no client id) callers keep legacy counting. Bonus fix:
+  burn-after-read no longer re-advances when a known viewer reconnects, and
+  its `burnedBy` set is deduplicated.
+
+### Added
+- Regression tests: granted editor can write in the same session (and is cut
+  off on revoke), view count stays flat across reconnects, burn countdown not
+  re-triggered by a repeat viewer. **44/44 tests green.**
+
+---
+
 ## [3.15.0] - 2026-09-14
 
 ### Fixed

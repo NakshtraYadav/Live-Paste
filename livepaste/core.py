@@ -1065,6 +1065,42 @@ class RoomManager:
                 self.editors.pop(slug, None)
             return count, len(self.editors.get(slug, set()))
 
+    async def set_editor(self, slug: str, ws: WebSocket, can_edit: bool):
+        """Update one live socket's editor membership (v3.15.1).
+
+        Permissions can change mid-session (owner grants/revokes edit); the
+        room's editors set must follow, or send_to_editors keeps whispering to
+        revoked users and ignores newly granted ones."""
+        async with self.lock:
+            eds = self.editors.setdefault(slug, set())
+            if can_edit:
+                eds.add(ws)
+            else:
+                eds.discard(ws)
+
+    async def apply_editor_list(self, slug: str, editors: list, paste_token: str):
+        """Recompute edit rights for EVERY socket in the room (v3.15.1).
+
+        The grant/revoke handler must not just broadcast — each connection's
+        server-side `canEdit` (a loop-local captured at handshake) would stay
+        stale forever, so a granted editor's edits were still rejected with
+        `read_only` while their UI showed unlocked. Every socket stores its
+        auth token + presence clientId, so rights are recomputed here against
+        the NEW allowlist and the editors set is kept in sync."""
+        async with self.lock:
+            room = self.rooms.get(slug) or set()
+            eds = self.editors.setdefault(slug, set())
+            for ws in room:
+                ws.canEdit = can_user_edit(
+                    {"editToken": paste_token, "editors": editors},
+                    getattr(ws, "authToken", ""),
+                    getattr(ws, "clientId", ""),
+                )
+                if ws.canEdit:
+                    eds.add(ws)
+                else:
+                    eds.discard(ws)
+
     def viewer_count(self, slug: str) -> int:
         return len(self.rooms.get(slug, set()))
 
@@ -1161,6 +1197,8 @@ async def ws_paste(websocket: WebSocket, slug: str):
         # Burn-after-read: opening the room counts as a view. The triggering
         # (Nth) reader still receives the content; the paste is destroyed behind
         # them so later joiners get not_found.
+        # v3.15.1: register_view counts UNIQUE viewers — a tab refresh or WS
+        # reconnect no longer inflates the counter.
         burn_note = None
         view_info = await storage.register_view(slug, client_id)
         if view_info:
@@ -1168,12 +1206,20 @@ async def ws_paste(websocket: WebSocket, slug: str):
                 await storage.purge_paste_files(slug)
                 await storage.delete_paste(slug)
             burn_note = view_info.get("burnAfterViews") or None
+            # The paste doc was fetched before the view was registered; carry
+            # the accurate, deduped count into the init payload.
+            paste["views"] = view_info.get("views", paste.get("views", 0))
 
         stored = paste.get("editToken")
         is_owner = (not stored) or bool(token) and secrets.compare_digest(token, str(stored))
         # v3.3.0: per-user edit permissions — token holders (owners) can grant
         # edit rights to specific people by their presence clientId.
         can_edit = can_user_edit(paste, token, client_id)
+        # v3.15.1: carry auth on the socket so rights can be recomputed live
+        # when the owner grants/revokes (see RoomManager.apply_editor_list).
+        websocket.authToken = token
+        websocket.clientId = client_id
+        websocket.canEdit = can_edit
 
         await manager.join(slug, websocket, can_edit)
         joined = True
@@ -1217,10 +1263,12 @@ async def ws_paste(websocket: WebSocket, slug: str):
                 continue
 
             # ---- writes require edit rights ----
+            # v3.15.1: read the LIVE per-socket flag (refreshed by
+            # apply_editor_list on grant/revoke), never a handshake-time local.
             if (
                 mtype in ("edit", "yupdate", "language", "cursor")
                 or (mtype or "").startswith("s:")
-            ) and not can_edit:
+            ) and not getattr(websocket, "canEdit", False):
                 await websocket.send_text(
                     json.dumps({"type": "error", "code": "read_only", "message": "This link is read-only"})
                 )
@@ -1354,7 +1402,7 @@ async def ws_paste(websocket: WebSocket, slug: str):
                 # The emoji + sender identity fan out to the whole room; every
                 # client renders the bubble drifting up its own editor.
                 r = msg.get("r") or {}
-                if not can_edit:
+                if not getattr(websocket, "canEdit", False):
                     await websocket.send_text(
                         json.dumps({"type": "error", "code": "read_only", "message": "This link is read-only"})
                     )
@@ -1436,6 +1484,11 @@ async def ws_paste(websocket: WebSocket, slug: str):
                         )
                         continue
                 await storage.update_editors(slug, editors)
+                # v3.15.1 fix: refresh EVERY socket's live rights against the
+                # new allowlist — the handshake-time value on the granted
+                # peer's loop was previously stale, so its edits were rejected
+                # with `read_only` even after the UI showed unlocked.
+                await manager.apply_editor_list(slug, editors, stored)
                 await manager.broadcast(
                     slug, {"type": "editors", "editors": editors, "changed": target, "granted": mtype == "grant-edit"}
                 )

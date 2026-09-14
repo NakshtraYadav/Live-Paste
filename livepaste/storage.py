@@ -132,9 +132,11 @@ class MongoStorage:
         await self.db.pastes.update_one({"slug": slug}, {"$inc": {"views": 1}})
 
     async def register_view(self, slug: str, client_id: str):
-        """Mongo twin of SQLiteStorage.register_view (see there)."""
+        """Mongo twin of SQLiteStorage.register_view — counts **unique**
+        viewers only (v3.15.1): refreshes and reconnects don't inflate the
+        counter, and burn-after-read never re-advances for a known viewer."""
         doc = await self.db.pastes.find_one(
-            {"slug": slug}, {"burnAfterViews": 1, "burnedBy": 1, "views": 1}
+            {"slug": slug}, {"burnAfterViews": 1, "burnedBy": 1, "views": 1, "viewers": 1}
         )
         if not doc:
             return None
@@ -145,9 +147,19 @@ class MongoStorage:
             await self.db.pastes.update_one(
                 {"slug": slug}, {"$set": {"burnedBy": burners[-2000:]}}
             )
-        await self.db.pastes.update_one({"slug": slug}, {"$inc": {"views": 1}})
+        seen = doc.get("viewers") or []
+        # Identified viewers dedupe (no refresh inflation); anonymous callers
+        # (empty client_id) keep legacy always-count semantics.
+        is_new_viewer = (not client_id) or (client_id not in seen)
+        if is_new_viewer:
+            updates = {}
+            if client_id:
+                seen = seen + [client_id]
+                updates["viewers"] = seen[-2000:]
+            updates["views"] = doc.get("views", 0) + 1
+            await self.db.pastes.update_one({"slug": slug}, {"$set": updates})
         return {
-            "views": doc.get("views", 0) + 1,
+            "views": doc.get("views", 0) + (1 if is_new_viewer else 0),
             "burnAfterViews": burn_after,
             "burners": len(burners),
             "shouldBurn": bool(burn_after and len(burners) >= burn_after),
@@ -496,7 +508,8 @@ class SQLiteStorage:
                 editors TEXT,
                 burn_after_views INTEGER,
                 password_hash TEXT,
-                burned_by TEXT
+                burned_by TEXT,
+                viewers TEXT
             )"""
         )
         # Migration for pre-v2.8 databases
@@ -505,6 +518,7 @@ class SQLiteStorage:
             ("password_hash", "ALTER TABLE pastes ADD COLUMN password_hash TEXT"),
             ("burned_by", "ALTER TABLE pastes ADD COLUMN burned_by TEXT"),
             ("editors", "ALTER TABLE pastes ADD COLUMN editors TEXT"),
+            ("viewers", "ALTER TABLE pastes ADD COLUMN viewers TEXT"),  # v3.15.1: unique-viewer counting
         ):
             try:
                 await self._conn.execute(ddl)
@@ -648,14 +662,19 @@ class SQLiteStorage:
             await self._conn.commit()
 
     async def register_view(self, slug: str, client_id: str):
-        """Count a view; for burn-after-read pastes also record unique burners.
+        """Count a **unique** view (v3.15.1).
+
+        The counter only advances the first time a given viewer (client_id)
+        opens the paste — tab refreshes and WebSocket reconnects no longer
+        inflate it. For burn-after-read pastes the same distinct-viewer set
+        drives self-destruct, so repeat visits never re-advance the burn.
 
         Returns None when the paste is gone, else a dict with `shouldBurn`
         (True once the number of distinct viewers reached burnAfterViews).
         """
         async with self._lock:
             cur = await self._conn.execute(
-                "SELECT burn_after_views, burned_by, views FROM pastes WHERE slug = ?", (slug,)
+                "SELECT burn_after_views, burned_by, views, viewers FROM pastes WHERE slug = ?", (slug,)
             )
             row = await cur.fetchone()
             if not row:
@@ -668,10 +687,23 @@ class SQLiteStorage:
                     "UPDATE pastes SET burned_by = ? WHERE slug = ?",
                     (",".join(burners[:2000]), slug),
                 )
-            await self._conn.execute("UPDATE pastes SET views = views + 1 WHERE slug = ?", (slug,))
+            seen = (row["viewers"] or "").split(",") if row["viewers"] else []
+            # Identified viewers dedupe (no refresh inflation); anonymous
+            # callers (empty client_id) keep legacy always-count semantics.
+            is_new_viewer = (not client_id) or (client_id not in seen)
+            if is_new_viewer:
+                if client_id:
+                    seen.append(client_id)
+                    await self._conn.execute(
+                        "UPDATE pastes SET viewers = ? WHERE slug = ?",
+                        (",".join(seen[-2000:]), slug),
+                    )
+                await self._conn.execute(
+                    "UPDATE pastes SET views = views + 1 WHERE slug = ?", (slug,)
+                )
             await self._conn.commit()
             return {
-                "views": row["views"] + 1,
+                "views": row["views"] + (1 if is_new_viewer else 0),
                 "burnAfterViews": burn_after,
                 "burners": len(burners),
                 "shouldBurn": bool(burn_after and len(burners) >= burn_after),

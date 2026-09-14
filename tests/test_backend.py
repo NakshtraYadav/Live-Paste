@@ -838,3 +838,92 @@ def test_reorder_sheets_validates_and_persists(client):
         ).status_code
         == 403
     )
+
+
+# ---------------- v3.15.1 regressions ----------------
+
+def _recv_until(ws, mtype, max_msgs=12):
+    """Read messages until one of `mtype` arrives (order-tolerant: presence,
+    editors and relay messages can interleave). Fails if it never shows up."""
+    for _ in range(max_msgs):
+        msg = ws.receive_json()
+        if msg.get("type") == mtype:
+            return msg
+    raise AssertionError(f"never received {mtype!r}")
+
+
+def test_ws_grant_edit_applies_immediately(client):
+    """A granted editor's writes must be accepted by the server in the SAME
+    session — the handshake-time can_edit must not stay stale (v3.15.1), and
+    revocation must apply immediately too."""
+    p = _create(client, content="collab")
+    slug, token = p["slug"], p["editToken"]
+
+    with client.websocket_connect(f"/api/ws/{slug}?token={token}&clientId=owner") as owner, \
+         client.websocket_connect(f"/api/ws/{slug}?clientId=peer") as peer:
+        # A peer's presence broadcast can interleave before init (join happens
+        # before the init send), so reads must be order-tolerant.
+        assert _recv_until(owner, "init")
+        assert _recv_until(peer, "init")
+
+        # Owner grants edit to the peer's clientId
+        owner.send_json({"type": "grant-edit", "clientId": "peer"})
+        ed = _recv_until(peer, "editors")
+        assert ed["granted"] is True and ed["changed"] == "peer"
+
+        # THE FIX: the peer can write right now, no reconnect
+        peer.send_json({"type": "edit", "content": "granted editor typing"})
+        forwarded = _recv_until(owner, "edit")
+        assert forwarded["content"] == "granted editor typing"
+
+        # Revocation also applies to the live socket
+        owner.send_json({"type": "revoke-edit", "clientId": "peer"})
+        rv = _recv_until(peer, "editors")
+        assert rv["granted"] is False
+        peer.send_json({"type": "edit", "content": "should be rejected"})
+        err = _recv_until(peer, "error")
+        assert err["code"] == "read_only"
+
+
+def test_unique_view_counting_on_reconnect(client):
+    """Refreshing / reconnecting must not inflate the view counter (v3.15.1):
+    one count per distinct clientId, deduped across WS joins and REST views."""
+    p = _create(client, content="v")
+    slug = p["slug"]
+
+    # First join by alpha → 1 unique view
+    with client.websocket_connect(f"/api/ws/{slug}?clientId=alpha") as ws:
+        init = ws.receive_json()
+        assert init["paste"]["views"] == 1
+    # Refresh: same viewer rejoins → still 1
+    with client.websocket_connect(f"/api/ws/{slug}?clientId=alpha") as ws:
+        init = ws.receive_json()
+        assert init["paste"]["views"] == 1
+    # A different viewer → 2
+    with client.websocket_connect(f"/api/ws/{slug}?clientId=beta") as ws:
+        init = ws.receive_json()
+        assert init["paste"]["views"] == 2
+    # REST dedupes against the same set too
+    r = client.get(f"/api/paste/{slug}?count_view=1&clientId=alpha")
+    assert r.json()["views"] == 2
+    r = client.get(f"/api/paste/{slug}?count_view=1&clientId=gamma")
+    assert r.json()["views"] == 3
+
+
+def test_burn_after_read_not_retriggered_by_reconnect(client):
+    """Burn-after-read counts distinct viewers; a known viewer reconnecting
+    must not advance the burn countdown (v3.15.1)."""
+    p = _create(client, content="burn", burnAfterViews=2)
+    slug = p["slug"]
+
+    with client.websocket_connect(f"/api/ws/{slug}?clientId=a") as ws:
+        assert ws.receive_json()["type"] == "init"
+    # alpha reconnects — must NOT trigger the burn
+    with client.websocket_connect(f"/api/ws/{slug}?clientId=a") as ws:
+        assert ws.receive_json()["type"] == "init"
+    assert client.get(f"/api/paste/{slug}").status_code == 200
+    # second distinct viewer reaches the threshold; they still get content
+    with client.websocket_connect(f"/api/ws/{slug}?clientId=b") as ws:
+        assert ws.receive_json()["type"] == "init"
+    # paste is gone for everyone after
+    assert client.get(f"/api/paste/{slug}").status_code == 404

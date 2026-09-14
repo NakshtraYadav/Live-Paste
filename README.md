@@ -258,6 +258,7 @@ All routes are prefixed with `/api`.
 - No file type is ever rejected; untrusted types download instead of render
 - Reserved slugs (`api`, `ws`, `static`, `new`, `about`, …) cannot be claimed; custom slugs validated, duplicates rejected
 - Rate limits (per IP): 30 paste creations/hour, 60 uploads/hour — `X-Forwarded-For` is honored only when `LIVEPASTE_TRUST_PROXY=1`
+- View counts are **unique viewers** (per client id): tab refreshes and WebSocket reconnects never inflate the counter
 - Revisions: last **50** snapshots per paste
 
 ## Security model
