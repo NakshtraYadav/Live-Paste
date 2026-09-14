@@ -119,10 +119,13 @@ def fetch_release_asset(asset_name, timeout=300, tag=None):
 
 
 def fetch_release_info(timeout=4):
-    """List recent GitHub releases: [{tag, name, date, summary}].
+    """List recent GitHub releases (falling back to git tags): [{tag, name,
+    date, summary}].
 
     Powers `livepaste rollback --list` — users see every released version
     with a one-line summary and can roll back to any of them by tag.
+    v3.16.0: when the repo publishes releases, use them; otherwise fall back
+    to the git tag list (tag-pinned pip installs work from bare tags too).
     Best-effort: returns [] when offline.
     """
     slug = repo_slug()
@@ -133,6 +136,9 @@ def fetch_release_info(timeout=4):
         req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.load(resp)
+    except Exception:
+        data = None
+    if data:
         out = []
         for rel in data:
             body = (rel.get("body") or "").strip()
@@ -146,6 +152,19 @@ def fetch_release_info(timeout=4):
                 }
             )
         return out
+    # Fall back to plain git tags (repos without GitHub Releases objects)
+    try:
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{slug}/tags?per_page=30",
+            headers={"Accept": "application/vnd.github+json"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            tags = json.load(resp)
+        return [
+            {"tag": t.get("name") or "", "name": "", "date": "", "summary": "(git tag)"}
+            for t in tags
+            if (t.get("name") or "").startswith("v")
+        ]
     except Exception:
         return []
 
@@ -447,11 +466,18 @@ def cmd_update(args):
     target = f"git+https://github.com/{slug}.git"
     if channel and channel != "stable":
         target = f"git+https://github.com/{slug}.git@{channel}"
+    elif latest:
+        # v3.16.0: pin updates to the release TAG (not main HEAD) so pip
+        # installs are symmetric with rollback — update lands exactly on the
+        # released version, never on untagged drift.
+        target = f"git+https://github.com/{slug}.git@v{latest}"
     print(f"Updating LivePaste from {target} ...")
     result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--upgrade", "--quiet", target]
+        [sys.executable, "-m", "pip", "install", "--upgrade", "--quiet", "--force-reinstall", "--no-deps", target]
     )
     if result.returncode == 0:
+        if latest:
+            record_history(latest, "update", release_summary_for(latest), tag=f"v{latest}")
         mark_pending_restart(latest or "?", "update", release_summary_for(latest or ""))
         print(f"✓ Updated successfully{f' to v{latest}' if latest else ''}. Restart `livepaste start` to use it — or run: livepaste restart")
     else:
@@ -459,70 +485,158 @@ def cmd_update(args):
         sys.exit(result.returncode)
 
 
-def cmd_rollback(args):
-    """Roll back to a previous version.
+def _print_rollback_list():
+    """Released versions + summaries, merged with this machine's install ledger.
 
-    - `livepaste rollback`          → restore the .old binary (instant, offline)
-    - `livepaste rollback --list`   → show released versions with summaries
-    - `livepaste rollback v3.3.0`   → download + verify + install that exact tag
+    Works in every install mode — it is read-only (GitHub + local ledger).
     """
-    if not is_frozen():
-        print("Rollback is for standalone binary installs. pip users: reinstall a pinned version:")
-        print(f'  pip install "git+https://github.com/{repo_slug()}.git@v<version>"')
-        sys.exit(1)
-    target = os.path.realpath(sys.executable)
+    print(f"  {BOLD}Released versions{RESET}  {DIM}({repo_slug()}){RESET}")
+    hist = {h["version"]: h for h in load_history()}
+    for rel in fetch_release_info():
+        tag = rel["tag"]
+        ver = tag.lstrip("v")
+        ran = hist.get(ver)
+        marker = ""
+        if ver == __version__:
+            marker = f"  {GREEN}← running{RESET}"
+        elif ran:
+            marker = f"  {DIM}(was installed {ran['ts']}){RESET}"
+        print(f"  {BOLD}{tag}{RESET}  {DIM}{rel['date']}{RESET}{marker}")
+        if rel["summary"]:
+            print(f"      {rel['summary']}")
+    if is_frozen():
+        print(f"\n  {DIM}Install one: livepaste rollback v<version>{RESET}")
+    else:
+        print(f"\n  {DIM}Install one: livepaste rollback v<version>  (pip installs are switched in place){RESET}")
 
-    # --list: merge the machine's version ledger with GitHub releases
+
+def _pip_prev_version_from_ledger():
+    """Most recent OTHER version this machine has run (pip-mode default target)."""
+    current = str(__version__)
+    for entry in load_history():
+        ver = str(entry.get("version") or "")
+        if ver and ver != current:
+            return ver
+    return None
+
+
+def _pip_install_tag(tag):
+    """pip-install LivePaste pinned to a git tag in THIS environment.
+
+    Returns the pip exit code. --no-deps keeps shared dependencies (fastapi,
+    uvicorn, …) untouched — a rollback switches the app, not the stack.
+    """
+    target = f"git+https://github.com/{repo_slug()}.git@{tag}"
+    print(f"  Installing LivePaste {tag} …")
+    return subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--quiet", "--force-reinstall", "--no-deps", target]
+    ).returncode
+
+
+def _is_editable_install():
+    """True when running from a git checkout (pip install -e / direct run)."""
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.isdir(os.path.join(repo_root, ".git"))
+
+
+def cmd_rollback(args):
+    """Roll back to a previous version — in ANY install mode (v3.16.0).
+
+    Standalone binary:
+    - `livepaste rollback`          → restore the .old binary (instant, offline)
+    - `livepaste rollback v3.3.0`   → download + verify + install that exact tag
+
+    pip / pipx installs:
+    - `livepaste rollback`          → reinstall the previous version (from the
+                                      local version ledger), right in this venv
+    - `livepaste rollback v3.3.0`   → pip-install that exact git tag
+
+    All modes:
+    - `livepaste rollback --list`   → show released versions with summaries
+    """
+    # --list: read-only, works everywhere
     if getattr(args, "list", False):
-        print(f"  {BOLD}Released versions{RESET}  {DIM}({repo_slug()}){RESET}")
-        hist = {h["version"]: h for h in load_history()}
-        for rel in fetch_release_info():
-            tag = rel["tag"]
-            ver = tag.lstrip("v")
-            ran = hist.get(ver)
-            marker = ""
-            if ver == __version__:
-                marker = f"  {GREEN}← running{RESET}"
-            elif ran:
-                marker = f"  {DIM}(was installed {ran['ts']}){RESET}"
-            print(f"  {BOLD}{tag}{RESET}  {DIM}{rel['date']}{RESET}{marker}")
-            if rel["summary"]:
-                print(f"      {rel['summary']}")
+        _print_rollback_list()
         return
 
-    # rollback to a specific tag → same path as an update, but pinning the tag
+    # ---------------- standalone binary mode ----------------
+    if is_frozen():
+        target = os.path.realpath(sys.executable)
+        # rollback to a specific tag → same path as an update, but pinning the tag
+        if getattr(args, "tag", None):
+            tag = args.tag if args.tag.startswith("v") else f"v{args.tag}"
+            current = f"v{__version__}"
+            if tag == current:
+                print(f"Already running {tag}.")
+                return
+            _update_binary(None, assume_yes=args.yes, tag=tag)
+            record_history(__version__, "rollback", summary=f"rolled back from {tag}")
+            if args.restart:
+                cmd_restart(args)
+            return
+
+        # classic .old swap — instant and offline
+        old = f"{target}.old"
+        if not os.path.exists(old):
+            print("No previous version found next to the binary.")
+            print("Install a specific released version instead:")
+            print("  livepaste rollback --list            # see versions")
+            print("  livepaste rollback v3.3.0            # install that tag")
+            sys.exit(1)
+        import shutil
+        import tempfile
+
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(target), prefix=".livepaste-rb-")
+        with os.fdopen(tmp_fd, "wb") as out, open(old, "rb") as src:
+            shutil.copyfileobj(src, out)
+        os.chmod(tmp_path, os.stat(old).st_mode)
+        os.replace(tmp_path, target)
+        os.remove(old)
+        record_history(__version__, "rollback", summary="restored .old binary")
+        mark_pending_restart(__version__, "rollback", "restored previous binary")
+        print("✓ Rolled back to the previous version. Restart `livepaste start` — or run: livepaste restart")
+        return
+
+    # ---------------- pip / pipx mode (v3.16.0: real rollback) ----------------
     if getattr(args, "tag", None):
         tag = args.tag if args.tag.startswith("v") else f"v{args.tag}"
-        current = f"v{__version__}"
-        if tag == current:
+        if tag == f"v{__version__}":
             print(f"Already running {tag}.")
             return
-        _update_binary(None, assume_yes=args.yes, tag=tag)
-        record_history(__version__, "rollback", summary=f"rolled back from {tag}")
-        if args.restart:
-            cmd_restart(args)
+    else:
+        prev = _pip_prev_version_from_ledger()
+        if not prev:
+            print("No previous version recorded on this machine yet.")
+            print("Pick one explicitly:")
+            print("  livepaste rollback --list            # see released versions")
+            print("  livepaste rollback v3.3.0            # install that tag")
+            sys.exit(1)
+        tag = f"v{prev}"
+        if tag == f"v{__version__}":
+            print(f"Already running {tag}.")
+            return
+    if _is_editable_install():
+        print("You are running from a git checkout, so there is nothing to roll back:")
+        print("the code on disk IS the running code. To test another version:")
+        print(f'  git checkout {tag or "v<version>"}   # in {repo_slug()}')
         return
-
-    # classic .old swap — instant and offline
-    old = f"{target}.old"
-    if not os.path.exists(old):
-        print("No previous version found next to the binary.")
-        print("Install a specific released version instead:")
-        print("  livepaste rollback --list            # see versions")
-        print("  livepaste rollback v3.3.0            # install that tag")
-        sys.exit(1)
-    import shutil
-    import tempfile
-
-    tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(target), prefix=".livepaste-rb-")
-    with os.fdopen(tmp_fd, "wb") as out, open(old, "rb") as src:
-        shutil.copyfileobj(src, out)
-    os.chmod(tmp_path, os.stat(old).st_mode)
-    os.replace(tmp_path, target)
-    os.remove(old)
-    record_history(__version__, "rollback", summary="restored .old binary")
-    mark_pending_restart(__version__, "rollback", "restored previous binary")
-    print("✓ Rolled back to the previous version. Restart `livepaste start` — or run: livepaste restart")
+    if not getattr(args, "yes", False):
+        answer = input(f"Roll back to {tag} ? [Y/n] ").strip().lower()
+        if answer and answer not in ("y", "yes"):
+            print("Rollback cancelled.")
+            return
+    rc = _pip_install_tag(tag)
+    if rc != 0:
+        print("✗ Rollback failed — see pip output above.")
+        sys.exit(rc)
+    record_history(tag.lstrip("v"), "rollback", summary=f"pip rollback to {tag}")
+    mark_pending_restart(tag.lstrip("v"), "rollback", f"pip rollback to {tag}")
+    print(f"✓ Rolled back to {tag} in this environment.")
+    print("  Restart `livepaste start` to use it — or run: livepaste restart")
+    print("  (Any running server keeps the old code until it restarts.)")
+    if getattr(args, "restart", False):
+        cmd_restart(args)
+    return
 
 
 def _pid_is_livepaste(pid):

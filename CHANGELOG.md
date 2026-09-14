@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.16.0] - 2026-09-14
+
+### Fixed
+- **`livepaste rollback` now works in EVERY install mode (was binary-only):**
+  pip/pipx users previously got "Rollback is for standalone binary installs"
+  and a manual instruction. Rollback now actually performs the version switch:
+  bare `livepaste rollback` reinstalls the previous version (chosen from the
+  local version ledger), `livepaste rollback v3.x.y` installs that exact git
+  tag — right in the active venv, with `--no-deps` so shared dependencies
+  never move. A pending-restart marker is recorded so `livepaste restart`
+  applies it, and every rollback/update is appended to the version ledger
+  that `rollback --list` shows.
+- **`livepaste rollback --list` never empty:** when the repo has no published
+  GitHub Releases, the list now falls back to the repo's git tags instead of
+  showing nothing.
+- **`livepaste update` (pip mode) now pins to the release tag** instead of
+  main HEAD, and uses `--force-reinstall --no-deps` — updates and rollbacks
+  are symmetric, deterministic, and don't touch shared dependencies.
+- **Git-checkout installs get correct guidance** (`git checkout v<version>`) —
+  no more dead-end messages in editable mode.
+
+### Changed
+- Rollback asks for confirmation before switching versions (skip with `-y`).
+
+---
+
 ## [3.15.1] - 2026-09-14
 
 ### Fixed
