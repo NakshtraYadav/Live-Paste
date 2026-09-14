@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.4.0] - 2026-09-14
+
+### Fixed
+- **New pages no longer inherit the previous page's text.** A page switch
+  inside the 120 ms CRDT coalescing window re-labeled page-1 edits onto the
+  new page, and the doc-swap race seeded fresh pages with the outgoing
+  page's content — and relayed it to the server for that sheet. Updates now
+  carry the sheet they were typed on from queue time, content refs reset
+  before any await during a switch, and `s:state` no longer seeds a blank
+  page unless the stored text is actually non-empty. Verified end-to-end:
+  page 1 and page 2 now hold strictly their own text.
+- **QR code no longer overlaps the toolbar.** It renders as a centered modal
+  overlay card (click the backdrop to dismiss) instead of a cramped inline
+  block that collided with dropdowns, badges, and the editor gutter.
+- **Renaming yourself updates everywhere instantly** — the new name is
+  re-announced over the presence channel the moment it's set, so avatar
+  chips and cursor name tags change live on every peer's screen instead of
+  waiting for the next keystroke.
+- **Recording works on mobile browsers.** iOS Safari (which can't produce
+  webm) now records via `audio/mp4`, Firefox via `audio/ogg`; screen capture
+  on browsers without `getDisplayMedia` returns a clean "not supported"
+  message instead of failing silently; a mic track ending (unplugged, OS
+  revocation) now finishes a voice note cleanly — previously only the screen
+  video track was watched, so dead-mic recordings produced empty files.
+  Failure toasts explain permission denials instead of nothing happening.
+- **Reconnect after a server restart no longer dead-ends.** When the server
+  comes back without the paste (ephemeral/local mode wipes data on restart),
+  the "nothing at this link" screen now detects a locally saved offline copy
+  and offers "Restore local copy as new paste" with one click.
+
+### Changed
+- **P2P mode now follows the active page**: the WebRTC topic re-attaches on
+  every sheet switch, so peers sync the page they are actually on. Data
+  channels are per-page (`lp:<slug>:<sheet>`), pairs still discover each
+  other through the self-hosted signaling relay.
+- **Service worker cache version is now bumped with every release**
+  (`lp-v3.4.0`), so installed PWA clients pick up new bundles immediately
+  instead of pinning an old app shell (the root cause of "my changes don't
+  show up" during this release's testing).
+- Run documentation: `yarn build` must be followed by copying `frontend/build`
+  → `livepaste/static`; the server serves the bundled copy.
+
+---
+
 ## [3.3.0] - 2026-09-14
 
 ### Added
