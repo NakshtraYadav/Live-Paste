@@ -12,15 +12,18 @@ permissions:
 jobs:
   build:
     strategy:
+      # One leg failing must never cancel the others (v3.16.0: a single
+      # broken runner used to cancel every build).
+      fail-fast: false
       matrix:
         include:
           - os: macos-14        # Apple Silicon (arm64)
             asset: livepaste-macos-arm64
           - os: macos-13        # Intel (x86_64)
             asset: livepaste-macos-x86_64
-          - os: ubuntu-22.04    # Linux x86_64
+          - os: ubuntu-24.04    # Linux x86_64
             asset: livepaste-linux-x86_64
-          - os: ubuntu-22.04-arm  # Linux arm64 (Raspberry Pi 4+, ARM servers)
+          - os: ubuntu-24.04-arm  # Linux arm64 (Raspberry Pi 4+, ARM servers)
             asset: livepaste-linux-arm64
     runs-on: ${{ matrix.os }}
     steps:

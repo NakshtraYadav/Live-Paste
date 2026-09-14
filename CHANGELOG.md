@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Rollback asks for confirmation before switching versions (skip with `-y`).
+- **CI:** release matrix migrated off the deprecated `ubuntu-22.04` runner
+  (→ `ubuntu-24.04` / `ubuntu-24.04-arm`) and set to `fail-fast: false`, so a
+  single broken build leg can no longer cancel the other platforms' builds.
 
 ---
 
