@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.13.0] - 2026-09-14
+
+### Added
+- **Find & replace** — `Ctrl/Cmd+H` opens a floating bar with live match
+  count, match-case toggle (`Aa`), and Replace-all. Edits route through the
+  CRDT so every peer sees the replacement instantly.
+
+---
+
 ## [3.12.0] - 2026-09-14
 
 ### Added
