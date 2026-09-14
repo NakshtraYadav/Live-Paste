@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.10.0] - 2026-09-14
+
+### Added
+- **Markdown preview toggle** — the "MD" button in the toolbar overlays a live
+  rendered preview (GFM tables, task lists, code blocks) over the editor.
+  Works in read-only mode too.
+- Rendering is sanitized with DOMPurify (script/style/iframe/event-handler
+  stripping) — safe for untrusted collaborative content.
+
+---
+
 ## [3.9.0] - 2026-09-14
 
 ### Added
