@@ -287,6 +287,13 @@ class RestoreBody(BaseModel):
     content: str
 
 
+class ForkBody(BaseModel):
+    editToken: str = ""  # required unless the source paste is open (legacy)
+    customSlug: Optional[str] = None
+    expiry: str = "never"
+    copyFiles: bool = True  # duplicate attachments into the fork
+
+
 class SheetCreateBody(BaseModel):
     editToken: str
     name: str = ""
@@ -554,6 +561,105 @@ def _sheets_with_main(sheets):
         key=lambda s: s.get("position", 0),
     )
     return [{"sheetId": "main", "name": "Page 1", "position": 0}] + rest
+
+
+@api_router.post("/paste/{slug}/fork")
+async def fork_paste(slug: str, body: ForkBody, request: Request):
+    """Create a full independent copy of a paste — main content, language,
+    extra pages, and (optionally) every attachment (v3.7.0).
+
+    Auth: source edit token, or a granted editor clientId, or (view-only
+    forks) an unlocked source. Locked sources require the view password so a
+    fork cannot be used as a lock bypass.
+    """
+    ip = client_ip(request)
+    if not limiter.allow(f"create:{ip}", limit=30, window_s=3600):
+        raise HTTPException(status_code=429, detail="Too many pastes created — try again later")
+
+    src = await get_paste_doc(slug)
+    if not src:
+        raise HTTPException(status_code=404, detail="Paste not found or expired")
+
+    pw_hash = src.get("passwordHash")
+    is_editor = can_user_edit(src, body.editToken, request.query_params.get("clientId", ""))
+    if not is_editor:
+        # Non-editors may fork an unlocked paste; locked ones must know the pw.
+        if pw_hash and not check_password(request.query_params.get("pw", ""), pw_hash):
+            raise HTTPException(status_code=403, detail="Edit token or view password required to fork")
+        if body.copyFiles:
+            # Copying someone's attachments is a content grab — editors only.
+            body.copyFiles = False
+
+    if body.expiry not in EXPIRY_MAP:
+        raise HTTPException(status_code=400, detail="Invalid expiry option")
+    if len(src.get("content", "")) > MAX_CONTENT_SIZE:
+        raise HTTPException(status_code=413, detail="Source content too large to fork")
+
+    new_slug = None
+    if body.customSlug:
+        candidate = body.customSlug.strip()
+        if not SLUG_RE.match(candidate):
+            raise HTTPException(status_code=400, detail="Custom link must be 3-64 chars: letters, numbers, hyphens, underscores")
+        if candidate.lower() in RESERVED_SLUGS:
+            raise HTTPException(status_code=400, detail="This link name is reserved, please choose another")
+        if await storage.slug_exists(candidate):
+            raise HTTPException(status_code=409, detail="This link is already taken, please choose another")
+        new_slug = candidate
+    else:
+        for _ in range(10):
+            candidate = gen_slug()
+            if not await storage.slug_exists(candidate):
+                new_slug = candidate
+                break
+        if not new_slug:
+            raise HTTPException(status_code=500, detail="Could not generate unique link, try again")
+
+    delta = EXPIRY_MAP[body.expiry]
+    edit_token = new_edit_token()
+    fork = {
+        "slug": new_slug,
+        "content": src.get("content", ""),
+        "language": src.get("language", "plaintext"),
+        "views": 0,
+        "createdAt": now_utc().isoformat(),
+        "updatedAt": now_utc().isoformat(),
+        "expiresAt": (now_utc() + delta).isoformat() if delta else None,
+        "rev": 0,
+        "editToken": edit_token,
+        "forkedFrom": slug,
+    }
+    await storage.insert_paste(fork)
+
+    # Copy extra pages (sheets)
+    copied_sheets = 0
+    for sheet in await storage.list_sheets(slug):
+        full = await storage.get_sheet(slug, sheet["sheetId"])
+        if not full or len(full.get("content", "")) > MAX_CONTENT_SIZE:
+            continue
+        if await storage.count_sheets(new_slug) >= MAX_SHEETS_PER_PASTE:
+            break
+        sid = secrets.token_hex(6)
+        await storage.insert_sheet(
+            new_slug, sid, full["name"], full.get("content", ""),
+            full.get("language", "plaintext"), full.get("position", 0), now_utc(),
+        )
+        copied_sheets += 1
+
+    # Copy attachments (new ids so deletes never alias across pastes)
+    copied_files = 0
+    if body.copyFiles:
+        for f in await storage.list_files(slug):
+            try:
+                if await storage.copy_file(f["id"], new_slug):
+                    copied_files += 1
+            except Exception as e:
+                logger.warning(f"Fork file copy failed for {f['id']}: {e}")
+
+    public = _redact_paste(fork)
+    public["editToken"] = edit_token  # returned ONCE, at creation
+    public["copiedSheets"] = copied_sheets
+    public["copiedFiles"] = copied_files
+    return public
 
 
 @api_router.get("/paste/{slug}/sheets")

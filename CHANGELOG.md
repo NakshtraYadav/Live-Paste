@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.7.0] - 2026-09-14
+
+### Added
+- **Fork paste** — one click (Share menu → "Fork this paste") creates a full
+  independent copy: main content, language, every extra page, and every
+  attachment (duplicated under new ids so deletes never alias across pastes).
+  The fork gets a fresh edit token stored in the creator's browser.
+- Fork authorization: editors fork with file copying; viewers may fork an
+  unlocked paste read-content-only; **locked pastes require the view password
+  so forking can't bypass the lock**.
+- New endpoint `POST /api/paste/{slug}/fork` (+ `forkedFrom` marker on the
+  created paste).
+
+### Tests
+- 4 fork regression tests (full copy, independent edits, lock semantics,
+  custom-slug collisions) — 38 total.
+
+---
+
 ## [3.6.0] - 2026-09-14
 
 ### Added

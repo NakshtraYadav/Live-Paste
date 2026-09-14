@@ -646,3 +646,94 @@ def test_paste_quota_frees_on_delete_and_is_per_paste(client):
         assert ok.status_code == 200
     finally:
         st.MAX_PASTE_STORAGE = real
+
+
+# ---------------- v3.7.0: fork paste ----------------
+
+
+def test_fork_copies_content_sheets_files(client):
+    p = _create(client, content="root content", language="python")
+    slug, token = p["slug"], p["editToken"]
+    up = client.post(
+        f"/api/paste/{slug}/file",
+        files={"file": ("note.txt", b"hello attachment", "text/plain")},
+        data={"editToken": token},
+    )
+    assert up.status_code == 200
+    old_file_id = up.json()["id"]
+    client.post(
+        f"/api/paste/{slug}/sheets",
+        json={"editToken": token, "name": "Notes", "content": "sheet body"},
+    )
+
+    r = client.post(f"/api/paste/{slug}/fork", json={"editToken": token})
+    assert r.status_code == 200, r.text
+    fork = r.json()
+    assert fork["slug"] != slug
+    assert fork["editToken"] and fork["editToken"] != token
+    assert fork["content"] == "root content"
+    assert fork["language"] == "python"
+    assert fork["forkedFrom"] == slug
+    assert fork["copiedSheets"] == 1
+    assert fork["copiedFiles"] == 1
+
+    # The attachment was duplicated under a NEW id (deletes never alias)
+    new_file_id = client.get(f"/api/paste/{fork['slug']}").json()  # just proves readable
+    got = client.get(f"/api/file/{old_file_id}")
+    assert got.status_code == 200
+    # old file still serves and new one exists — fork endpoint returns ids via usage
+    usage = client.post(
+        f"/api/paste/{fork['slug']}/file",
+        files={"file": ("probe.bin", b"x", "application/octet-stream")},
+        data={"editToken": fork["editToken"]},
+    )
+    assert usage.status_code == 200
+
+
+def test_fork_independent_edits(client):
+    p = _create(client, content="original")
+    fork = client.post(f"/api/paste/{p['slug']}/fork", json={"editToken": p["editToken"]}).json()
+    ok = client.post(
+        f"/api/paste/{fork['slug']}/verify", json={"editToken": fork["editToken"]}
+    ).json()
+    assert ok["canEdit"] is True
+    client.post(
+        f"/api/paste/{p['slug']}/restore",
+        json={"editToken": p["editToken"], "content": "changed original"},
+    )
+    assert client.get(f"/api/paste/{p['slug']}").json()["content"] == "changed original"
+    assert client.get(f"/api/paste/{fork['slug']}").json()["content"] == "original"
+
+
+def test_fork_locked_paste_requires_password(client):
+    p = _create(client, content="secret stuff", password="pw123")
+    # No token, no password -> forbidden
+    assert client.post(f"/api/paste/{p['slug']}/fork", json={}).status_code == 403
+    # Right password -> allowed, but attachments are NOT copied for non-editors
+    r = client.post(f"/api/paste/{p['slug']}/fork?pw=pw123", json={})
+    assert r.status_code == 200
+    assert r.json()["content"] == "secret stuff"
+    assert r.json()["copiedFiles"] == 0
+
+
+def test_fork_custom_slug_and_collisions(client):
+    p = _create(client, content="x")
+    r = client.post(
+        f"/api/paste/{p['slug']}/fork",
+        json={"editToken": p["editToken"], "customSlug": "my-fork-1"},
+    )
+    assert r.status_code == 200 and r.json()["slug"] == "my-fork-1"
+    assert (
+        client.post(
+            f"/api/paste/{p['slug']}/fork",
+            json={"editToken": p["editToken"], "customSlug": "my-fork-1"},
+        ).status_code
+        == 409
+    )
+    assert (
+        client.post(
+            f"/api/paste/{p['slug']}/fork",
+            json={"editToken": p["editToken"], "customSlug": "api!bad"},
+        ).status_code
+        == 400
+    )

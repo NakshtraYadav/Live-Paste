@@ -262,6 +262,54 @@ class MongoStorage:
         except Exception:
             return None
 
+    async def list_files(self, slug: str):
+        """Attachment metadata for a paste (used by fork/export — v3.7.0)."""
+        rows = await self.db["images.files"].find(
+            {"metadata.slug": slug}, {"_id": 1, "filename": 1, "length": 1, "metadata.contentType": 1}
+        ).to_list(1000)
+        return [
+            {
+                "id": str(r["_id"]),
+                "name": r.get("filename", "file"),
+                "contentType": (r.get("metadata") or {}).get("contentType"),
+                "size": r.get("length", 0),
+            }
+            for r in rows
+        ]
+
+    async def copy_file(self, file_id: str, new_slug: str):
+        """Duplicate an attachment under a new id for a forked paste (v3.7.0)."""
+        from bson import ObjectId
+
+        try:
+            oid = ObjectId(file_id)
+            stream = await self.images_bucket.open_download_stream(oid)
+        except Exception:
+            return None
+        metadata = stream.metadata or {}
+        grid_in = self.images_bucket.open_upload_stream(
+            stream.filename or "file",
+            metadata={
+                "slug": new_slug,
+                "contentType": metadata.get("contentType", "application/octet-stream"),
+                "uploadedAt": now_utc().isoformat(),
+            },
+        )
+        try:
+            while True:
+                chunk = await stream.readchunk()
+                if not chunk:
+                    break
+                await grid_in.write(chunk)
+            await grid_in.close()
+        except Exception:
+            try:
+                await grid_in.abort()
+            except Exception:
+                pass
+            raise
+        return str(grid_in._id)
+
     # Legacy alias
     delete_image = delete_file
 
@@ -731,6 +779,39 @@ class SQLiteStorage:
             )
             row = await cur.fetchone()
         return dict(row) if row else None
+
+    async def list_files(self, slug: str):
+        """Attachment metadata for a paste (used by fork/export — v3.7.0)."""
+        async with self._lock:
+            cur = await self._conn.execute(
+                "SELECT id, name, content_type, size FROM images WHERE slug = ? ORDER BY uploaded_at ASC",
+                (slug,),
+            )
+            return [
+                {"id": r["id"], "name": r["name"], "contentType": r["content_type"], "size": r["size"]}
+                for r in await cur.fetchall()
+            ]
+
+    async def copy_file(self, file_id: str, new_slug: str):
+        """Duplicate an attachment under a new id for a forked paste (v3.7.0).
+        Returns the new file id, or None when the source is missing."""
+        async with self._lock:
+            cur = await self._conn.execute("SELECT * FROM images WHERE id = ?", (file_id,))
+            row = await cur.fetchone()
+        if not row:
+            return None
+        src = self.images_dir / file_id
+        if not src.exists():
+            return None
+        new_id = uuid.uuid4().hex[:24]
+        (self.images_dir / new_id).write_bytes(src.read_bytes())
+        async with self._lock:
+            await self._conn.execute(
+                "INSERT INTO images (id, slug, name, content_type, size, uploaded_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (new_id, new_slug, row["name"], row["content_type"], row["size"], now_utc().isoformat()),
+            )
+            await self._conn.commit()
+        return new_id
 
     # Legacy alias
     delete_image = delete_file
