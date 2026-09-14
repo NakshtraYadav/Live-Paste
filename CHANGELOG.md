@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.12.0] - 2026-09-14
+
+### Added
+- **Revision diff view** — every history row now has a "Diff" button showing a
+  line-level diff (added/removed highlighting, +/- counters) of that revision
+  against the current content, in the lower half of the history panel.
+
+---
+
 ## [3.11.0] - 2026-09-14
 
 ### Added
