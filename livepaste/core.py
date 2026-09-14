@@ -307,6 +307,11 @@ class SheetUpdateBody(BaseModel):
     language: Optional[str] = None
 
 
+class ReorderBody(BaseModel):
+    editToken: str
+    order: list  # sheet ids in the desired order, "main" first
+
+
 def _yupdates_b64(updates: List[bytes]) -> List[str]:
     return [base64.b64encode(u).decode() for u in updates]
 
@@ -742,6 +747,30 @@ async def update_sheet(slug: str, sheet_id: str, body: SheetUpdateBody):
     )
     sheet = await storage.get_sheet(slug, sheet_id)
     return {"sheetId": sheet_id, "name": sheet["name"], "language": sheet["language"]}
+
+
+@api_router.post("/paste/{slug}/sheets/reorder")
+async def reorder_sheets(slug: str, body: ReorderBody):
+    """Reorder pages by supplying the full sheet-id order (v3.9.0).
+    "main" is always position 0; missing ids keep their relative order."""
+    paste = await get_paste_doc(slug)
+    if not paste:
+        raise HTTPException(status_code=404, detail="Paste not found or expired")
+    require_edit_token(paste, body.editToken)
+
+    existing = await storage.list_sheets(slug)
+    existing_ids = [s["sheetId"] for s in existing]
+    provided = [sid for sid in body.order if isinstance(sid, str)]
+    # The stored sheets must appear exactly once; "main" is implicit first.
+    if sorted(provided) != sorted(["main"] + existing_ids):
+        raise HTTPException(status_code=400, detail='Order must contain "main" plus every current page id')
+    if provided[0] != "main":
+        raise HTTPException(status_code=400, detail='"main" must stay first')
+
+    # Persist positions for the stored (non-main) sheets in their given order.
+    await storage.reorder_sheets(slug, [sid for sid in provided if sid != "main"])
+    await manager.broadcast(slug, {"type": "sheets-changed", "action": "reordered"})
+    return {"ok": True, "order": provided}
 
 
 @api_router.post("/paste/{slug}/sheets/{sheet_id}/duplicate")

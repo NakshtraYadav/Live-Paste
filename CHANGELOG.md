@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.9.0] - 2026-09-14
+
+### Added
+- **Reorder pages** — hover a page tab and use the ◀ ▶ arrows to move it;
+  "Page 1" (main) always stays first. Order broadcasts to everyone via
+  `sheets-changed` and persists per paste.
+- New endpoint `POST /api/paste/{slug}/sheets/reorder` (validates the full
+  id order; main-first enforced server-side).
+
+### Tests
+- Reorder validation + persistence test — 41 total.
+
+---
+
 ## [3.8.0] - 2026-09-14
 
 ### Added

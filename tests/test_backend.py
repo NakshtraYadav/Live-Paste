@@ -794,3 +794,47 @@ def test_duplicate_sheet_requires_edit_and_names_deconflict(client):
     assert d1["name"] != d2["name"]
     names = {s["name"] for s in client.get(f"/api/paste/{slug}/sheets").json()["sheets"]}
     assert d1["name"] in names and d2["name"] in names
+
+
+# ---------------- v3.9.0: reorder pages ----------------
+
+
+def test_reorder_sheets_validates_and_persists(client):
+    p = _create(client, content="x")
+    slug, token = p["slug"], p["editToken"]
+    a = client.post(f"/api/paste/{slug}/sheets", json={"editToken": token, "name": "A", "content": "a"}).json()["sheetId"]
+    b = client.post(f"/api/paste/{slug}/sheets", json={"editToken": token, "name": "B", "content": "b"}).json()["sheetId"]
+
+    # main must stay first
+    assert (
+        client.post(
+            f"/api/paste/{slug}/sheets/reorder",
+            json={"editToken": token, "order": [a, b, "main"]},
+        ).status_code
+        == 400
+    )
+    # incomplete order rejected
+    assert (
+        client.post(
+            f"/api/paste/{slug}/sheets/reorder",
+            json={"editToken": token, "order": ["main", a]},
+        ).status_code
+        == 400
+    )
+    # valid reorder: B before A
+    ok = client.post(
+        f"/api/paste/{slug}/sheets/reorder",
+        json={"editToken": token, "order": ["main", b, a]},
+    )
+    assert ok.status_code == 200
+    sheets = client.get(f"/api/paste/{slug}/sheets").json()["sheets"]
+    assert [s["sheetId"] for s in sheets] == ["main", b, a]
+
+    # read-only cannot reorder
+    assert (
+        client.post(
+            f"/api/paste/{slug}/sheets/reorder",
+            json={"editToken": "bad", "order": ["main", a, b]},
+        ).status_code
+        == 403
+    )
