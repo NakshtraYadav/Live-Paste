@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.11.0] - 2026-09-14
+
+### Added
+- **Sandboxed HTML preview** — HTML pastes get a "Run HTML" button that
+  renders the content live in a sandboxed iframe. Scripts run (so demos and
+  visualizations work) inside an opaque origin: no access to this app's DOM,
+  storage, or cookies.
+- The button appears for `html` language pastes or content that looks like a
+  full HTML document.
+
+---
+
 ## [3.10.0] - 2026-09-14
 
 ### Added
