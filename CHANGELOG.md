@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.16.1] - 2026-09-14
+
+### Changed
+- Tagged releases **v3.15.1** and **v3.16.0** pushed to GitHub so the release
+  workflow produces binaries + SHA256SUMS for rollback/update targets.
+- Release matrix migrated off the deprecated `ubuntu-22.04` runner
+  (→ `ubuntu-24.04` / `ubuntu-24.04-arm`); `fail-fast: false` so one broken
+  leg no longer cancels the other platforms' builds.
+- Note: GitHub Actions on the account is currently locked due to a billing
+  issue — runs are refused with "The job was not started because your account
+  is locked due to a billing issue" until that is resolved in account
+  settings; the workflow is ready and will run once unlocked.
+
+---
+
 ## [3.16.0] - 2026-09-14
 
 ### Fixed
