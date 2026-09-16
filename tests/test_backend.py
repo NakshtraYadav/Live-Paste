@@ -573,6 +573,22 @@ def test_websocket_origin_policy_rejects_untrusted_browser_origin(client):
         assert error["code"] == "origin_not_allowed"
 
 
+def test_websocket_connection_budget_is_enforced_and_released(client):
+    """Admission limits protect one process and release slots on disconnect."""
+    real_limit = lpc.WS_ADMISSION_LIMIT
+    lpc.WS_ADMISSION_LIMIT = 1
+    try:
+        p = _create(client, content="connection budget")
+        with client.websocket_connect(f"/api/ws/{p['slug']}") as first:
+            assert first.receive_json()["type"] == "init"
+            with client.websocket_connect(f"/api/ws/{p['slug']}") as blocked:
+                assert blocked.receive_json()["code"] == "connection_limit"
+        with client.websocket_connect(f"/api/ws/{p['slug']}") as after_release:
+            assert after_release.receive_json()["type"] == "init"
+    finally:
+        lpc.WS_ADMISSION_LIMIT = real_limit
+
+
 # ---------------- v3.1.1: handshake disconnect robustness ----------------
 
 def test_ws_vanish_before_init_does_not_leak_room(client):

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.16.13] - 2026-09-16 — WebSocket admission controls
+
+### Security
+- Added a 64-connection-per-IP WebSocket admission budget for collaboration and signaling sockets.
+- Redis-backed deployments share the admission counter across workers; local fallback state is released on disconnect and remains bounded.
+- Added regression coverage for blocked connections and slot reuse after disconnect.
+
+### Documentation
+- Updated the README and full security audit for WebSocket admission controls.
+
+---
+
 ## [3.16.12] - 2026-09-16 — Shared password lockouts
 
 ### Security

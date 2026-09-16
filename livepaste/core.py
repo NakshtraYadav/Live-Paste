@@ -350,6 +350,60 @@ def client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+ws_admission_local: Dict[str, int] = {}
+ws_admission_redis = None
+ws_admission_redis_failed = False
+WS_ADMISSION_LIMIT = 64
+WS_ADMISSION_WINDOW_S = 90
+
+
+async def _ws_admit(ip: str) -> str:
+    """Reserve one bounded WebSocket slot for an IP, shared through Redis."""
+    global ws_admission_redis, ws_admission_redis_failed
+    key = f"livepaste:ws:admission:{ip}"
+    redis_url = os.environ.get("REDIS_URL", "").strip()
+    if redis_url and not ws_admission_redis_failed:
+        try:
+            if ws_admission_redis is None:
+                from redis import asyncio as redis
+                ws_admission_redis = redis.from_url(redis_url, decode_responses=True)
+            count = await ws_admission_redis.incr(key)
+            if count == 1:
+                await ws_admission_redis.expire(key, WS_ADMISSION_WINDOW_S)
+            if count > WS_ADMISSION_LIMIT:
+                await ws_admission_redis.decr(key)
+                return ""
+            return key
+        except Exception as exc:
+            ws_admission_redis_failed = True
+            if os.environ.get("LIVEPASTE_REQUIRE_REDIS", "") == "1":
+                raise RuntimeError("Redis WebSocket admission is required but unavailable") from exc
+            logger.warning("Redis WebSocket admission unavailable; using local fallback: %s", exc)
+    elif os.environ.get("LIVEPASTE_REQUIRE_REDIS", "") == "1":
+        raise RuntimeError("LIVEPASTE_REQUIRE_REDIS=1 requires REDIS_URL")
+
+    count = ws_admission_local.get(ip, 0)
+    if count >= WS_ADMISSION_LIMIT:
+        return ""
+    ws_admission_local[ip] = count + 1
+    return ip
+
+
+async def _ws_release(ip: str, key: str) -> None:
+    if not key:
+        return
+    if key.startswith("livepaste:ws:admission:") and ws_admission_redis is not None:
+        try:
+            await ws_admission_redis.decr(key)
+            return
+        except Exception:
+            pass
+    if ip in ws_admission_local:
+        ws_admission_local[ip] = max(0, ws_admission_local[ip] - 1)
+        if ws_admission_local[ip] == 0:
+            ws_admission_local.pop(ip, None)
+
+
 def websocket_origin_allowed(websocket: WebSocket) -> bool:
     """Allow same-origin browsers or an explicitly configured frontend origin.
 
@@ -1367,6 +1421,13 @@ async def ws_paste(websocket: WebSocket, slug: str):
         await _try_close(websocket, 4403)
         return
 
+    admission_ip = ws_client_ip(websocket)
+    admission_key = await _ws_admit(admission_ip)
+    if not admission_key:
+        await _try_send(websocket, json.dumps({"type": "error", "code": "connection_limit", "message": "Too many WebSocket connections"}))
+        await _try_close(websocket, 4429)
+        return
+
     try:
         paste = await get_paste_doc(slug)
         if not paste:
@@ -1754,6 +1815,7 @@ async def ws_paste(websocket: WebSocket, slug: str):
     except Exception as e:
         logger.warning(f"WS error on {slug}: {e}")
     finally:
+        await _ws_release(admission_ip, admission_key)
         manager.peer_remove_ws(slug, websocket)
         cid = getattr(websocket, "peerClientId", None)
         count, _ = await manager.leave(slug, websocket)
@@ -1802,7 +1864,14 @@ async def ws_signaling(websocket: WebSocket):
         await _signaling_error(websocket, "origin_not_allowed", "WebSocket origin is not allowed")
         await _try_close(websocket, 4403)
         return
+    admission_ip = ws_client_ip(websocket)
+    admission_key = await _ws_admit(admission_ip)
+    if not admission_key:
+        await _signaling_error(websocket, "connection_limit", "Too many WebSocket connections")
+        await _try_close(websocket, 4429)
+        return
     if len(signaling_connections) >= MAX_SIGNALING_CONNECTIONS:
+        await _ws_release(admission_ip, admission_key)
         await _signaling_error(websocket, "capacity", "Signaling relay at capacity")
         await _try_close(websocket, 1013)
         return
@@ -1905,6 +1974,7 @@ async def ws_signaling(websocket: WebSocket):
     except Exception as e:
         logger.warning(f"signaling WS error: {e}")
     finally:
+        await _ws_release(admission_ip, admission_key)
         signaling_connections.discard(websocket)
         for topic in topics:
             room = signaling_rooms.get(topic)
