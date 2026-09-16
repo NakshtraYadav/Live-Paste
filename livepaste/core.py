@@ -38,6 +38,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
     HTTPException,
+    Header,
     UploadFile,
     File,
     Form,
@@ -534,10 +535,17 @@ def _redact_paste(paste: dict) -> dict:
 
 
 @api_router.get("/paste/{slug}")
-async def get_paste(slug: str, count_view: bool = False, clientId: str = "", pw: str = ""):
+async def get_paste(
+    slug: str,
+    count_view: bool = False,
+    clientId: str = "",
+    pw: str = "",
+    view_password: Optional[str] = Header(None, alias="X-View-Password"),
+):
     paste = await get_paste_doc(slug)
     if not paste:
         raise HTTPException(status_code=404, detail="Paste not found or expired")
+    pw = pw or view_password or ""
     pw_hash = paste.get("passwordHash")
     if pw_hash and not check_password(pw, pw_hash):
         raise HTTPException(status_code=401, detail="Password required")
@@ -744,13 +752,19 @@ async def list_sheets(slug: str):
 
 
 @api_router.get("/paste/{slug}/sheets/{sheet_id}")
-async def get_sheet(slug: str, sheet_id: str, pw: str = ""):
+async def get_sheet(
+    slug: str,
+    sheet_id: str,
+    pw: str = "",
+    view_password: Optional[str] = Header(None, alias="X-View-Password"),
+):
     paste = await get_paste_doc(slug)
     if not paste:
         raise HTTPException(status_code=404, detail="Paste not found or expired")
     # v3.5.1 (security): locked pastes must authenticate on EVERY read path,
     # not just GET /paste/{slug} — this endpoint previously leaked sheet
     # content to anyone with the URL while the paste page showed a lock.
+    pw = pw or view_password or ""
     pw_hash = paste.get("passwordHash")
     if pw_hash and not check_password(pw, pw_hash):
         raise HTTPException(status_code=401, detail="Password required")
@@ -923,12 +937,18 @@ async def list_revisions(slug: str):
 
 
 @api_router.get("/paste/{slug}/revisions/{rev}")
-async def get_revision(slug: str, rev: int, pw: str = ""):
+async def get_revision(
+    slug: str,
+    rev: int,
+    pw: str = "",
+    view_password: Optional[str] = Header(None, alias="X-View-Password"),
+):
     paste = await get_paste_doc(slug)
     if not paste:
         raise HTTPException(status_code=404, detail="Paste not found or expired")
     # v3.5.1 (security): same gate as sheets — revision content is paste
     # content and must not be readable around the lock screen.
+    pw = pw or view_password or ""
     pw_hash = paste.get("passwordHash")
     if pw_hash and not check_password(pw, pw_hash):
         raise HTTPException(status_code=401, detail="Password required")
@@ -1241,14 +1261,31 @@ async def _try_close(ws: WebSocket, code: int) -> None:
         return
 
 
+def _websocket_auth(websocket: WebSocket):
+    """Decode the optional lp-auth subprotocol without putting secrets in URLs."""
+    for protocol in websocket.scope.get("subprotocols", []):
+        if not protocol.startswith("lp-auth."):
+            continue
+        encoded = protocol[len("lp-auth."):]
+        try:
+            padded = encoded + "=" * (-len(encoded) % 4)
+            payload = json.loads(base64.urlsafe_b64decode(padded).decode())
+            if isinstance(payload, dict):
+                return payload, protocol
+        except (ValueError, TypeError, UnicodeDecodeError):
+            continue
+    return {}, None
+
+
 @app.websocket("/api/ws/{slug}")
 async def ws_paste(websocket: WebSocket, slug: str):
-    token = websocket.query_params.get("token") or ""
-    pw = websocket.query_params.get("pw") or ""
-    client_id = websocket.query_params.get("clientId") or ""
-    capability = websocket.query_params.get("capability") or ""
+    auth, auth_protocol = _websocket_auth(websocket)
+    token = str(auth.get("token") or websocket.query_params.get("token") or "")
+    pw = str(auth.get("password") or websocket.query_params.get("pw") or "")
+    client_id = str(auth.get("clientId") or websocket.query_params.get("clientId") or "")
+    capability = str(auth.get("capability") or websocket.query_params.get("capability") or "")
 
-    await websocket.accept()
+    await websocket.accept(subprotocol=auth_protocol)
     if not websocket_origin_allowed(websocket):
         await _try_send(websocket, json.dumps({"type": "error", "code": "origin_not_allowed", "message": "WebSocket origin is not allowed"}))
         await _try_close(websocket, 4403)

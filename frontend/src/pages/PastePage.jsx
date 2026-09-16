@@ -93,6 +93,13 @@ const DEBOUNCE_MS = 250;
 const PING_INTERVAL_MS = 25000;
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
 
+const encodeWebSocketAuth = (payload) => {
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/=/g, "").replace(/\\+/g, "-").replace(/\\//g, "_");
+};
+
 const formatBytes = (bytes) => {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -220,13 +227,19 @@ export default function PastePage() {
     const pw = lockedPastePasswords.current[slug] || "";
     const clientId = getIdentity().clientId;
     const params = new URLSearchParams();
-    if (token) params.set("token", token);
-    if (pw) params.set("pw", pw);
     if (clientId) params.set("clientId", clientId);
     const capability = editorCapabilityStore.get(slug) || editorCapability;
-    if (capability) params.set("capability", capability);
     const qs = params.toString();
-    const ws = new WebSocket(`${WS_BASE}/api/ws/${slug}${qs ? `?${qs}` : ""}`);
+    const authProtocol = `lp-auth.${encodeWebSocketAuth({
+      token,
+      password: pw,
+      clientId,
+      capability,
+    })}`;
+    const ws = new WebSocket(
+      `${WS_BASE}/api/ws/${slug}${qs ? `?${qs}` : ""}`,
+      [authProtocol],
+    );
     wsRef.current = ws;
     activeSheetRef.current = activeSheet;
 
@@ -902,11 +915,11 @@ export default function PastePage() {
       setDocVersion((v) => v + 1); // ytext memo follows the swapped doc
 
       try {
-        // v3.5.1: locked pastes must send the session password on every read
-        const pwQ = lockedPastePasswords.current[slug]
-          ? `?pw=${encodeURIComponent(lockedPastePasswords.current[slug])}`
-          : "";
-        const res = await axios.get(`${API_BASE}/api/paste/${slug}/sheets/${sheetId}${pwQ}`);
+        // v3.5.1: locked pastes send the session password in a header, not a URL
+        const viewPassword = lockedPastePasswords.current[slug] || "";
+        const res = await axios.get(`${API_BASE}/api/paste/${slug}/sheets/${sheetId}`, {
+          headers: viewPassword ? { "X-View-Password": viewPassword } : {},
+        });
         setLanguage(res.data.language || "plaintext");
         const c = res.data.content || "";
         setContent(c);
@@ -1259,10 +1272,10 @@ export default function PastePage() {
   // v3.12.0 — load a revision and diff it against the current content.
   const handleDiffRevision = async (rev) => {
     try {
-      const pwQ = lockedPastePasswords.current[slug]
-        ? `?pw=${encodeURIComponent(lockedPastePasswords.current[slug])}`
-        : "";
-      const res = await axios.get(`${API_BASE}/api/paste/${slug}/revisions/${rev}${pwQ}`);
+      const viewPassword = lockedPastePasswords.current[slug] || "";
+      const res = await axios.get(`${API_BASE}/api/paste/${slug}/revisions/${rev}`, {
+        headers: viewPassword ? { "X-View-Password": viewPassword } : {},
+      });
       setDiffData({ oldText: res.data.content || "", newText: contentRef.current || "" });
       setDiffRev(rev);
     } catch (err) {
@@ -1272,10 +1285,10 @@ export default function PastePage() {
 
   const handleRestoreRevision = async (rev) => {
     try {
-      const pwQ = lockedPastePasswords.current[slug]
-        ? `?pw=${encodeURIComponent(lockedPastePasswords.current[slug])}`
-        : "";
-      const res = await axios.get(`${API_BASE}/api/paste/${slug}/revisions/${rev}${pwQ}`);
+      const viewPassword = lockedPastePasswords.current[slug] || "";
+      const res = await axios.get(`${API_BASE}/api/paste/${slug}/revisions/${rev}`, {
+        headers: viewPassword ? { "X-View-Password": viewPassword } : {},
+      });
       const restored = res.data.content;
       await axios.post(`${API_BASE}/api/paste/${slug}/restore`, {
         editToken,

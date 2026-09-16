@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.16.10] - 2026-09-16 — Credential transport hardening
+
+### Security
+- New clients send WebSocket passwords, edit tokens, and editor capabilities through the negotiated `lp-auth` subprotocol instead of new query-string transport.
+- Password-protected sheet and revision reads now use `X-View-Password` headers.
+- Legacy query-string credentials remain temporarily supported for compatibility and migration.
+- Added regression coverage for header-based password reads and WebSocket subprotocol authentication.
+
+### Documentation
+- Updated the README and full security audit for the credential transport changes.
+
+---
+
 ## [3.16.9] - 2026-09-16 — Safer edit links
 
 ### Security

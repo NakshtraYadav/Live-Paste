@@ -6,6 +6,7 @@ Runs against FastAPI's TestClient with a temp SQLite data dir.
 """
 
 import base64
+import json
 import os
 import tempfile
 
@@ -263,6 +264,12 @@ def test_locked_paste_cannot_leak_via_sheets_or_revisions(client):
     r = client.get(f"/api/paste/{slug}/sheets/main?pw=pw123")
     assert r.status_code == 200
     assert r.json()["content"] == "SECRET BODY"
+    header_read = client.get(
+        f"/api/paste/{slug}/sheets/main",
+        headers={"X-View-Password": "pw123"},
+    )
+    assert header_read.status_code == 200
+    assert header_read.json()["content"] == "SECRET BODY"
 
     # revision content is paste content — must be gated too (401 before 404,
     # so probing for revisions can't distinguish existing from missing ones)
@@ -499,8 +506,16 @@ def test_password_lock_websocket(client):
     with client.websocket_connect(f"/api/ws/{slug}") as ws:
         msg = ws.receive_json()
         assert msg["code"] == "password_required"
-    # Right password → init arrives
+    # Right password in the legacy query → init arrives
     with client.websocket_connect(f"/api/ws/{slug}?pw=pw123") as ws:
+        msg = ws.receive_json()
+        assert msg["type"] == "init" and msg["paste"]["content"] == "locked-ws"
+
+    # New clients send the password in the negotiated auth subprotocol.
+    auth = base64.urlsafe_b64encode(json.dumps({"password": "pw123"}).encode()).decode().rstrip("=")
+    with client.websocket_connect(
+        f"/api/ws/{slug}", subprotocols=[f"lp-auth.{auth}"]
+    ) as ws:
         msg = ws.receive_json()
         assert msg["type"] == "init" and msg["paste"]["content"] == "locked-ws"
 

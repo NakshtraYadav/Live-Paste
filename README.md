@@ -4,7 +4,7 @@
 
 LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Create a paste, share the link, and everyone with the link can view it live — no accounts, no sign-up, no install. Hand out **edit links** to let people type along: edits sync conflict-free (CRDT) so simultaneous typing just works.
 
-- **Version:** see [`VERSION`](./VERSION) — currently **3.16.9**
+- **Version:** see [`VERSION`](./VERSION) — currently **3.16.10**
 - **Release history:** [`CHANGELOG.md`](./CHANGELOG.md)
 - **Security audit:** [`AUDIT.md`](./AUDIT.md) (full-stack review and remediation plan)
 - **Contributing:** [`CONTRIBUTING.md`](./CONTRIBUTING.md)
@@ -263,11 +263,12 @@ All routes are prefixed with `/api`.
 - View counts are **unique viewers** (per client id): tab refreshes and WebSocket reconnects never inflate the counter
 - P2P signaling is bounded to **16 topics per connection**, **64KB frames**, and **120 publishes/minute** per connection
 - WebSocket connections validate browser `Origin`; cross-origin frontends must be listed in `CORS_ORIGINS`
+- New clients send WebSocket credentials through the negotiated `lp-auth` subprotocol; legacy query-string credentials remain temporarily supported for compatibility
 - Revisions: last **50** snapshots per paste
 
 ## Security model
 
-- Edit tokens and password hashes are redacted from every API/WebSocket payload; new edit links use URL fragments so tokens are not sent to servers, while view passwords are bcrypt-hashed and enforced on **every** read path (paste, sheets, revisions, WebSocket)
+- Edit tokens and password hashes are redacted from every API/WebSocket payload; new edit links use URL fragments so tokens are not sent to servers, while new clients transport view passwords through headers/subprotocols and passwords remain enforced on **every** read path (paste, sheets, revisions, WebSocket)
 - Uploads and deletes require server-side edit authorization (not just frontend gating); creators use the edit token and granted peers use server-derived capabilities, while the UI resolves the current credential at action time to avoid handshake races
 - Filenames sanitized; untrusted file types served as forced attachments; strict Content-Security-Policy (no `unsafe-inline` scripts), `nosniff`, `X-Frame-Options: SAMEORIGIN`, tight `Referrer-Policy`
 - `X-Forwarded-For` trusted only behind an explicit `LIVEPASTE_TRUST_PROXY=1` (prevents rate-limit spoofing)
