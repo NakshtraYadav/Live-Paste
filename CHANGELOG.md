@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.16.11] - 2026-09-16 — Distributed rate-limit foundation
+
+### Added
+- Added optional Redis-backed fixed-window rate limiting for paste creation and file uploads in multi-worker/hosted deployments.
+- Kept a bounded in-process fallback for local/offline availability and documented the `REDIS_URL` deployment setting.
+- Added the Redis client dependency to the installable package.
+
+### Security
+- Rate-limit keys are namespaced and Redis windows expire automatically; local fallback state is hard-bounded to prevent unbounded key growth.
+
+### Documentation
+- Updated the README and full security audit for shared rate-limit deployment.
+
+---
+
 ## [3.16.10] - 2026-09-16 — Credential transport hardening
 
 ### Security

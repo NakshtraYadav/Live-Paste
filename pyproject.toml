@@ -16,6 +16,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "aiosqlite>=0.20",
     "pydantic>=2",
+    "redis>=5.0",
 ]
 
 [project.scripts]

@@ -237,12 +237,38 @@ def _content_disposition(content_type: str, filename: str) -> str:
 
 # ---------------- Rate limiting (simple in-memory, per IP) ----------------
 class RateLimiter:
-    """Fixed-window limiter. Generous defaults: protects against abuse, not users."""
+    """Shared Redis fixed-window limiter with a bounded local fallback.
+
+    Set REDIS_URL in multi-worker/hosted deployments. If Redis is unavailable,
+    the process-local limiter remains available as a fail-open availability
+    fallback; operators can set LIVEPASTE_REQUIRE_REDIS=1 to fail closed at
+    startup instead of accepting reduced abuse protection.
+    """
 
     def __init__(self):
         self.events: Dict[str, List[float]] = {}
+        self._redis = None
+        self._redis_failed = False
 
-    def allow(self, key: str, limit: int, window_s: int) -> bool:
+    async def allow(self, key: str, limit: int, window_s: int) -> bool:
+        redis_url = os.environ.get("REDIS_URL", "").strip()
+        if redis_url and not self._redis_failed:
+            try:
+                if self._redis is None:
+                    from redis import asyncio as redis
+                    self._redis = redis.from_url(redis_url, decode_responses=True)
+                bucket = await self._redis.incr(f"livepaste:rate:{key}")
+                if bucket == 1:
+                    await self._redis.expire(f"livepaste:rate:{key}", window_s)
+                return bucket <= limit
+            except Exception as exc:
+                self._redis_failed = True
+                if os.environ.get("LIVEPASTE_REQUIRE_REDIS", "") == "1":
+                    raise RuntimeError("Redis rate limiter is required but unavailable") from exc
+                logger.warning("Redis rate limiter unavailable; using local fallback: %s", exc)
+        elif os.environ.get("LIVEPASTE_REQUIRE_REDIS", "") == "1":
+            raise RuntimeError("LIVEPASTE_REQUIRE_REDIS=1 requires REDIS_URL")
+
         now = time.monotonic()
         bucket = [t for t in self.events.get(key, []) if now - t < window_s]
         if len(bucket) >= limit:
@@ -250,7 +276,7 @@ class RateLimiter:
             return False
         bucket.append(now)
         self.events[key] = bucket
-        # opportunistic cleanup
+        # Hard bound local state so an attacker cannot grow it forever.
         if len(self.events) > 4096:
             cutoff = now - 3600
             self.events = {k: v for k, v in self.events.items() if v and v[-1] > cutoff}
@@ -423,7 +449,7 @@ async def version_info():
 @api_router.post("/paste")
 async def create_paste(body: PasteCreate, request: Request):
     ip = client_ip(request)
-    if not limiter.allow(f"create:{ip}", limit=30, window_s=3600):
+    if not await limiter.allow(f"create:{ip}", limit=30, window_s=3600):
         raise HTTPException(status_code=429, detail="Too many pastes created — try again later")
     if len(body.content) > MAX_CONTENT_SIZE:
         raise HTTPException(status_code=413, detail="Content too large (max 400KB)")
@@ -648,7 +674,7 @@ async def fork_paste(slug: str, body: ForkBody, request: Request):
     fork cannot be used as a lock bypass.
     """
     ip = client_ip(request)
-    if not limiter.allow(f"create:{ip}", limit=30, window_s=3600):
+    if not await limiter.allow(f"create:{ip}", limit=30, window_s=3600):
         raise HTTPException(status_code=429, detail="Too many pastes created — try again later")
 
     src = await get_paste_doc(slug)
@@ -961,7 +987,7 @@ async def get_revision(
 # ---------------- File endpoints (any file type) ----------------
 async def _upload_file(slug: str, file: UploadFile, request: Request):
     ip = client_ip(request)
-    if not limiter.allow(f"upload:{ip}", limit=60, window_s=3600):
+    if not await limiter.allow(f"upload:{ip}", limit=60, window_s=3600):
         raise HTTPException(status_code=429, detail="Too many uploads — try again later")
     paste = await get_paste_doc(slug)
     if not paste:

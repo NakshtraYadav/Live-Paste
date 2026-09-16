@@ -2,7 +2,7 @@
 
 **Assessment date:** 2026-09-16
 **Repository:** `NakshtraYadav/Live-Paste`
-**Reviewed version:** `3.16.10`
+**Reviewed version:** `3.16.11`
 **Scope:** FastAPI/SQLite/MongoDB backend, WebSockets and WebRTC signaling, file handling, frontend rendering and browser storage, CLI/update/rollback, packaging, CI/CD, and existing regression tests.
 
 ## Executive summary
@@ -96,12 +96,12 @@ The relay previously capped total connections but allowed each socket to subscri
 
 ### H4 — Password brute-force state and rate limits are process-local
 
-**Status:** Open — deployment scalability and abuse resistance
+**Status:** Partially fixed in v3.16.11; password lockout sharing remains
 **Affected area:** `RateLimiter`, `pw_failures`, WebSocket admission.
 
-The in-memory limiters work in one process and are covered by tests, but multiple workers/containers have independent counters. Attackers can multiply attempts by distributing requests across workers or IPs. Memory cleanup is opportunistic rather than a hard bounded store.
+The in-memory limiters work in one process and are covered by tests, but multiple workers/containers have independent counters. Attackers can multiply attempts by distributing requests across workers or IPs. Password lockout state remains process-local.
 
-**Remediation:** use Redis or another shared, bounded store for rate limits, lockouts, and WebSocket admission. Apply limits by IP, paste, and optionally a privacy-preserving paste identifier. Add trusted-proxy parsing that validates proxy topology rather than trusting an environment switch alone.
+**Fix in v3.16.11:** creation and upload rate limits can use an optional Redis fixed-window counter through `REDIS_URL`; local state remains bounded as an availability fallback. The deployment can later enforce fail-closed Redis availability. Password lockouts and WebSocket admission still need the shared backend treatment.
 
 ### M1 — CORS defaults are broad
 
