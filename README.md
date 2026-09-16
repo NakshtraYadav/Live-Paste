@@ -4,7 +4,7 @@
 
 LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Create a paste, share the link, and everyone with the link can view it live — no accounts, no sign-up, no install. Hand out **edit links** to let people type along: edits sync conflict-free (CRDT) so simultaneous typing just works.
 
-- **Version:** see [`VERSION`](./VERSION) — currently **3.16.8**
+- **Version:** see [`VERSION`](./VERSION) — currently **3.16.9**
 - **Release history:** [`CHANGELOG.md`](./CHANGELOG.md)
 - **Security audit:** [`AUDIT.md`](./AUDIT.md) (full-stack review and remediation plan)
 - **Contributing:** [`CONTRIBUTING.md`](./CONTRIBUTING.md)
@@ -267,7 +267,7 @@ All routes are prefixed with `/api`.
 
 ## Security model
 
-- Edit tokens and password hashes are redacted from every API/WebSocket payload; view passwords are bcrypt-hashed and enforced on **every** read path (paste, sheets, revisions, WebSocket)
+- Edit tokens and password hashes are redacted from every API/WebSocket payload; new edit links use URL fragments so tokens are not sent to servers, while view passwords are bcrypt-hashed and enforced on **every** read path (paste, sheets, revisions, WebSocket)
 - Uploads and deletes require server-side edit authorization (not just frontend gating); creators use the edit token and granted peers use server-derived capabilities, while the UI resolves the current credential at action time to avoid handshake races
 - Filenames sanitized; untrusted file types served as forced attachments; strict Content-Security-Policy (no `unsafe-inline` scripts), `nosniff`, `X-Frame-Options: SAMEORIGIN`, tight `Referrer-Policy`
 - `X-Forwarded-For` trusted only behind an explicit `LIVEPASTE_TRUST_PROXY=1` (prevents rate-limit spoofing)

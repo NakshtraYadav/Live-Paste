@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.16.9] - 2026-09-16 — Safer edit links
+
+### Security
+- New edit links now use URL fragments (`#edit=...`) instead of query parameters, preventing edit tokens from being sent to servers, proxies, or referrer destinations.
+- Legacy `?edit=...` links remain compatible and are removed from the address bar immediately after consumption.
+- Updated security documentation and contribution guidance for the safer link format.
+
+---
+
 ## [3.16.8] - 2026-09-16 — Signed editor capabilities
 
 ### Security

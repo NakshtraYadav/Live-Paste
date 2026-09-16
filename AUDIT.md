@@ -2,7 +2,7 @@
 
 **Assessment date:** 2026-09-16
 **Repository:** `NakshtraYadav/Live-Paste`
-**Reviewed version:** `3.16.8`
+**Reviewed version:** `3.16.9`
 **Scope:** FastAPI/SQLite/MongoDB backend, WebSockets and WebRTC signaling, file handling, frontend rendering and browser storage, CLI/update/rollback, packaging, CI/CD, and existing regression tests.
 
 ## Executive summary
@@ -45,14 +45,16 @@ The per-user grant feature stores a browser-provided `clientId` in the paste's e
 
 **Remaining work:** move the capability and other secrets out of query strings, consider short-lived rotation, and eventually support device public-key capabilities for stronger revocation and multi-device management. Do not describe a raw `clientId` as an authorization credential.
 
-### H2 — Edit tokens and view passwords appear in URLs
+### H2 — Edit tokens and view passwords appeared in URLs
 
-**Status:** Open — design change recommended before sensitive public use
+**Status:** Partially fixed in v3.16.9; password/session transport remains
 **Affected areas:** `/api/ws/{slug}?token=...`, `/api/ws/{slug}?pw=...`, `?pw=...` sheet/revision reads, edit links containing `?edit=...`.
 
 Query parameters are commonly logged by reverse proxies, load balancers, APM agents, browser history, copied URLs, and support tooling. WebSocket upgrade URLs are especially likely to be logged. A leaked edit token grants write access; a leaked password grants access to a locked paste.
 
-**Mitigations already present:** strict referrer policy, redaction from API payloads, session-only password storage in the browser, and no cookie-based authentication.
+**Fix in v3.16.9:** newly generated edit links use `#edit=<token>` fragments. Fragments are not sent in HTTP requests, WebSocket upgrade URLs, proxy logs, or Referer headers. Legacy `?edit=` links remain supported and are immediately removed from the address bar after loading.
+
+**Remaining work:** move view-password unlock state and WebSocket authentication fully into short-lived headers/session or subprotocol exchanges; current legacy query parameters remain supported for compatibility.
 
 **Required remediation:** move secrets to headers or a short-lived exchange:
 

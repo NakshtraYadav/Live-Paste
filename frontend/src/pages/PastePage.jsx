@@ -1227,7 +1227,7 @@ export default function PastePage() {
       return;
     }
     const editUrl = new URL(window.location.pathname, window.location.origin);
-    editUrl.searchParams.set("edit", currentEditToken);
+    editUrl.hash = `edit=${encodeURIComponent(currentEditToken)}`;
     const ok = await copyToClipboard(editUrl.toString());
     if (ok) {
       toast.success("Edit link copied — anyone with it can edit this paste");

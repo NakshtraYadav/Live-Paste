@@ -48,7 +48,7 @@ Key concepts:
 
 - **Edit tokens** — pastes carry a secret `editToken`; writes (REST + WS)
   require it. Viewers get read-only rooms. Tokens live in the creator's
-  `localStorage`; `?edit=<token>` URLs hand them to other devices.
+  `localStorage`; `#edit=<token>` fragment links hand them to other devices without sending the token to the server. Legacy `?edit=` links remain supported for compatibility.
 - **CRDT** — `yupdate` messages relay Yjs binary diffs; the server stores them
   as an ordered list (Yjs updates are commutative, so ordered replay
   converges). Full-text `edit` messages remain the persistence fallback.

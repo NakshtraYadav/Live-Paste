@@ -47,19 +47,24 @@ export const editorCapabilityStore = {
       return "";
     }
   },
-};
-
-// Accept ?edit=<token> in the URL, persist it, and strip it from the address bar
-// (share-able edit links). Returns the stored token for the slug.
+};// Accept #edit=<token> from the URL fragment, persist it, and strip it from
+// the address bar. Fragments are not sent in HTTP requests or proxy logs.
+// The legacy ?edit=<token> form remains readable for old shared links and is
+// removed immediately when encountered.
 export const consumeEditTokenFromUrl = (slug) => {
   try {
     const params = new URLSearchParams(window.location.search);
-    const t = params.get("edit");
+    const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : "";
+    const hashParams = new URLSearchParams(hash);
+    const t = hashParams.get("edit") || params.get("edit");
     if (t) {
       editTokenStore.save(slug, t);
       params.delete("edit");
-      const qs = params.toString();
-      window.history.replaceState({}, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
+      window.history.replaceState(
+        {},
+        "",
+        `${window.location.pathname}${params.toString() ? `?${params}` : ""}`,
+      );
     }
   } catch (e) {
     /* ignore */
