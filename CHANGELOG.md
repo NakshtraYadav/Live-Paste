@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.16.12] - 2026-09-16 — Shared password lockouts
+
+### Security
+- Password brute-force lockout counters now use the optional Redis backend alongside creation/upload rate limits.
+- Redis lockout keys expire automatically and local fallback state remains bounded.
+- `LIVEPASTE_REQUIRE_REDIS=1` now applies to password lockout operations as well as rate limits.
+
+### Documentation
+- Updated the README and full security audit for shared password lockout state.
+
+---
+
 ## [3.16.11] - 2026-09-16 — Distributed rate-limit foundation
 
 ### Added

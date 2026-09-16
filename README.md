@@ -4,7 +4,7 @@
 
 LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Create a paste, share the link, and everyone with the link can view it live — no accounts, no sign-up, no install. Hand out **edit links** to let people type along: edits sync conflict-free (CRDT) so simultaneous typing just works.
 
-- **Version:** see [`VERSION`](./VERSION) — currently **3.16.11**
+- **Version:** see [`VERSION`](./VERSION) — currently **3.16.12**
 - **Release history:** [`CHANGELOG.md`](./CHANGELOG.md)
 - **Security audit:** [`AUDIT.md`](./AUDIT.md) (full-stack review and remediation plan)
 - **Contributing:** [`CONTRIBUTING.md`](./CONTRIBUTING.md)
@@ -305,7 +305,7 @@ LIVEPASTE_DATA_DIR=/tmp/lp-live ./.venv/bin/uvicorn livepaste.core:app --port 80
 | Variable | Purpose |
 | --- | --- |
 | `MONGO_URL`, `DB_NAME` | Hosted mode (MongoDB); omit for SQLite |
-| `REDIS_URL` | Optional shared rate-limit backend for multi-worker/hosted deployments |
+| `REDIS_URL` | Optional shared rate-limit and password-lockout backend for multi-worker/hosted deployments |
 | `LIVEPASTE_REQUIRE_REDIS` | Reserved deployment policy flag for fail-closed Redis enforcement |
 | `CORS_ORIGINS` | Allowed CORS origins (comma-separated) |
 | `VITE_BACKEND_URL` | Backend URL baked into the frontend build (omit for same-origin) |

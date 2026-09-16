@@ -123,14 +123,42 @@ PW_MAX_FAILURES = 8
 PW_LOCKOUT_S = 300  # 5 minutes
 
 pw_failures: Dict[str, List[float]] = {}
+pw_redis = None
+pw_redis_failed = False
 
 
 def _pw_key(ip: str, slug: str) -> str:
-    return f"{ip}::{slug}"
+    return f"livepaste:pw:{ip}::{slug}"
 
 
-def _pw_blocked(ip: str, slug: str) -> bool:
+async def _pw_redis_client():
+    global pw_redis, pw_redis_failed
+    if pw_redis_failed or not os.environ.get("REDIS_URL", "").strip():
+        return None
+    try:
+        if pw_redis is None:
+            from redis import asyncio as redis
+            pw_redis = redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+        return pw_redis
+    except Exception as exc:
+        pw_redis_failed = True
+        if os.environ.get("LIVEPASTE_REQUIRE_REDIS", "") == "1":
+            raise RuntimeError("Redis password lockout is required but unavailable") from exc
+        logger.warning("Redis password lockout unavailable; using local fallback: %s", exc)
+        return None
+
+
+async def _pw_blocked(ip: str, slug: str) -> bool:
     key = _pw_key(ip, slug)
+    redis = await _pw_redis_client()
+    if redis is not None:
+        try:
+            return int(await redis.get(key) or 0) >= PW_MAX_FAILURES
+        except Exception as exc:
+            if os.environ.get("LIVEPASTE_REQUIRE_REDIS", "") == "1":
+                raise RuntimeError("Redis password lockout is required but unavailable") from exc
+            logger.warning("Redis password lockout read failed; using local fallback: %s", exc)
+
     now = time.monotonic()
     fails = [t for t in pw_failures.get(key, []) if now - t < PW_LOCKOUT_S]
     if fails:
@@ -140,18 +168,40 @@ def _pw_blocked(ip: str, slug: str) -> bool:
     return len(fails) >= PW_MAX_FAILURES
 
 
-def _pw_record_failure(ip: str, slug: str) -> None:
+async def _pw_record_failure(ip: str, slug: str) -> None:
     key = _pw_key(ip, slug)
+    redis = await _pw_redis_client()
+    if redis is not None:
+        try:
+            count = await redis.incr(key)
+            if count == 1:
+                await redis.expire(key, PW_LOCKOUT_S)
+            return
+        except Exception as exc:
+            if os.environ.get("LIVEPASTE_REQUIRE_REDIS", "") == "1":
+                raise RuntimeError("Redis password lockout is required but unavailable") from exc
+            logger.warning("Redis password lockout write failed; using local fallback: %s", exc)
+
     pw_failures.setdefault(key, []).append(time.monotonic())
-    # opportunistic cleanup so the dict cannot grow without bound
+    # Hard bound local state so attacker-controlled IPs cannot grow it forever.
     if len(pw_failures) > 4096:
         cutoff = time.monotonic() - PW_LOCKOUT_S
         for k in [k for k, v in pw_failures.items() if not v or v[-1] <= cutoff]:
             pw_failures.pop(k, None)
 
 
-def _pw_clear(ip: str, slug: str) -> None:
-    pw_failures.pop(_pw_key(ip, slug), None)
+async def _pw_clear(ip: str, slug: str) -> None:
+    key = _pw_key(ip, slug)
+    redis = await _pw_redis_client()
+    if redis is not None:
+        try:
+            await redis.delete(key)
+            return
+        except Exception as exc:
+            if os.environ.get("LIVEPASTE_REQUIRE_REDIS", "") == "1":
+                raise RuntimeError("Redis password lockout is required but unavailable") from exc
+            logger.warning("Redis password lockout clear failed; using local fallback: %s", exc)
+    pw_failures.pop(key, None)
 
 
 def ws_client_ip(websocket) -> str:
@@ -602,13 +652,13 @@ async def verify_paste_password(slug: str, body: dict, request: Request):
     if not pw_hash:
         return {"ok": True, "locked": False}
     ip = client_ip(request)
-    if _pw_blocked(ip, slug):
+    if await _pw_blocked(ip, slug):
         raise HTTPException(status_code=429, detail="Too many attempts — try again in a few minutes")
     provided = str(body.get("password") or "")
     if check_password(provided, pw_hash):
-        _pw_clear(ip, slug)
+        await _pw_clear(ip, slug)
         return {"ok": True, "locked": True}
-    _pw_record_failure(ip, slug)
+    await _pw_record_failure(ip, slug)
     return {"ok": False, "locked": True}
 
 
@@ -1331,7 +1381,7 @@ async def ws_paste(websocket: WebSocket, slug: str):
         if pw_hash:
             # Same brute-force guard as the REST unlock endpoint.
             wip = ws_client_ip(websocket)
-            if _pw_blocked(wip, slug):
+            if await _pw_blocked(wip, slug):
                 await _try_send(
                     websocket,
                     json.dumps({"type": "error", "code": "too_many_attempts", "message": "Too many password attempts — try again in a few minutes"}),
@@ -1339,14 +1389,14 @@ async def ws_paste(websocket: WebSocket, slug: str):
                 await _try_close(websocket, 4429)
                 return
             if not check_password(pw, pw_hash):
-                _pw_record_failure(wip, slug)
+                await _pw_record_failure(wip, slug)
                 await _try_send(
                     websocket,
                     json.dumps({"type": "error", "code": "password_required", "message": "This paste is locked"}),
                 )
                 await _try_close(websocket, 4401)
                 return
-            _pw_clear(wip, slug)
+            await _pw_clear(wip, slug)
 
         # Burn-after-read: opening the room counts as a view. The triggering
         # (Nth) reader still receives the content; the paste is destroyed behind
