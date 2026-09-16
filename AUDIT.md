@@ -2,7 +2,7 @@
 
 **Assessment date:** 2026-09-16
 **Repository:** `NakshtraYadav/Live-Paste`
-**Reviewed version:** `3.16.4`
+**Reviewed version:** `3.16.5`
 **Scope:** FastAPI/SQLite/MongoDB backend, WebSockets and WebRTC signaling, file handling, frontend rendering and browser storage, CLI/update/rollback, packaging, CI/CD, and existing regression tests.
 
 ## Executive summary
@@ -87,14 +87,14 @@ The environment does not include bcrypt by default, so the previous implementati
 
 **Next step:** on successful authentication of a legacy SHA-256 password, transparently rehash it with PBKDF2/bcrypt and persist the new hash. Add a migration report for remaining legacy hashes.
 
-### H3 — WebRTC signaling allows unbounded topic and message growth
+### H3 — WebRTC signaling allowed unbounded topic and message growth
 
-**Status:** Open — denial-of-service hardening
+**Status:** Partially fixed in v3.16.5; distributed controls and Origin validation remain
 **Affected area:** `/api/webrtc/signaling`.
 
-The relay caps total connections but allows each socket to subscribe to an unbounded number of `lp:` topics and publishes arbitrary nested dictionaries without a byte limit or per-socket rate limit. A client can create many topic sets and large messages, increasing memory, CPU, and fan-out cost.
+The relay previously capped total connections but allowed each socket to subscribe to an unbounded number of `lp:` topics and publish arbitrary nested dictionaries without a byte limit or per-socket rate limit. A client could create many topic sets and large messages, increasing memory, CPU, and fan-out cost.
 
-**Remediation:** enforce a maximum topics-per-socket limit, strict topic grammar tied to a validated slug/sheet ID, maximum frame size and JSON depth/serialized bytes, maximum recipients/fan-out, idle timeouts, and per-IP connection/message rate limits. Remove dead sockets under a lock and use a bounded relay queue.
+**Fix in v3.16.5:** topics now use a strict slug/sheet grammar, subscriptions are capped at 16 topics per socket, inbound and outbound frames are capped at 64KB, and publishes are capped at 120 per minute per connection. Invalid or unsubscribed publishes are rejected. Remaining work is distributed connection/rate limiting, WebSocket Origin validation, bounded relay queues, and lock-protected multi-worker state.
 
 ### H4 — Password brute-force state and rate limits are process-local
 

@@ -4,9 +4,9 @@
 
 LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Create a paste, share the link, and everyone with the link can view it live — no accounts, no sign-up, no install. Hand out **edit links** to let people type along: edits sync conflict-free (CRDT) so simultaneous typing just works.
 
-- **Version:** see [`VERSION`](./VERSION) — currently **3.16.4**
+- **Version:** see [`VERSION`](./VERSION) — currently **3.16.5**
 - **Release history:** [`CHANGELOG.md`](./CHANGELOG.md)
-- **Security audit:** [`AUDIT.md`](./AUDIT.md) (v3.5.1 hardening report)
+- **Security audit:** [`AUDIT.md`](./AUDIT.md) (full-stack review and remediation plan)
 - **Contributing:** [`CONTRIBUTING.md`](./CONTRIBUTING.md)
 
 ---
@@ -261,6 +261,7 @@ All routes are prefixed with `/api`.
 - Reserved slugs (`api`, `ws`, `static`, `new`, `about`, …) cannot be claimed; custom slugs validated, duplicates rejected
 - Rate limits (per IP): 30 paste creations/hour, 60 uploads/hour — `X-Forwarded-For` is honored only when `LIVEPASTE_TRUST_PROXY=1`
 - View counts are **unique viewers** (per client id): tab refreshes and WebSocket reconnects never inflate the counter
+- P2P signaling is bounded to **16 topics per connection**, **64KB frames**, and **120 publishes/minute** per connection
 - Revisions: last **50** snapshots per paste
 
 ## Security model

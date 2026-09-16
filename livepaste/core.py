@@ -1581,78 +1581,142 @@ async def ws_paste(websocket: WebSocket, slug: str):
 # out of the data path entirely.
 
 signaling_rooms: Dict[str, Set[WebSocket]] = {}
+signaling_connections: Set[WebSocket] = set()
 MAX_SIGNALING_CONNECTIONS = 512
+MAX_SIGNALING_TOPICS_PER_CONNECTION = 16
+MAX_SIGNALING_FRAME_BYTES = 64 * 1024
+MAX_SIGNALING_PUBLISHES_PER_MINUTE = 120
+SIGNALING_TOPIC_RE = re.compile(r"^lp:[a-zA-Z0-9_-]{3,64}:(?:main|[a-f0-9]{12})$")
+
+
+async def _signaling_error(websocket: WebSocket, code: str, message: str):
+    await _try_send(websocket, json.dumps({"type": "error", "code": code, "message": message}))
 
 
 # NOTE: deliberately NOT /api/ws/signaling — that path would be shadowed by
 # the /api/ws/{slug} paste route registered above it.
 @app.websocket("/api/webrtc/signaling")
 async def ws_signaling(websocket: WebSocket):
-    """y-webrtc-compatible signaling relay: subscribe/publish over topics."""
+    """Bounded y-webrtc-compatible signaling relay.
+
+    Signaling is not a document-data endpoint, but it is still an exposed
+    relay. Bound topics, frames, publish rates, and connection count so one
+    client cannot grow unbounded in-memory rooms or fan out oversized payloads.
+    """
     try:
         await websocket.accept()
     except Exception:
         return  # client vanished during the upgrade handshake
-    total = sum(len(room) for room in signaling_rooms.values())
-    if total >= MAX_SIGNALING_CONNECTIONS:
-        await _try_send(
-            websocket,
-            json.dumps({"type": "error", "message": "Signaling relay at capacity"}),
-        )
+    if len(signaling_connections) >= MAX_SIGNALING_CONNECTIONS:
+        await _signaling_error(websocket, "capacity", "Signaling relay at capacity")
         await _try_close(websocket, 1013)
         return
+
+    signaling_connections.add(websocket)
     topics: Set[str] = set()
+    publish_window_started = time.monotonic()
+    publish_count = 0
     try:
         while True:
             raw = await websocket.receive_text()
+            if len(raw.encode("utf-8")) > MAX_SIGNALING_FRAME_BYTES:
+                await _signaling_error(websocket, "frame_too_large", "Signaling message is too large")
+                continue
             try:
                 msg = json.loads(raw)
             except (ValueError, TypeError):
+                await _signaling_error(websocket, "invalid_json", "Signaling message must be valid JSON")
                 continue
+            if not isinstance(msg, dict):
+                await _signaling_error(websocket, "invalid_message", "Signaling message must be an object")
+                continue
+
             mtype = msg.get("type")
             if mtype == "subscribe":
                 new_topics = msg.get("topics")
-                if isinstance(new_topics, list):
-                    for t in new_topics:
-                        if isinstance(t, str) and t.startswith("lp:"):
-                            topics.add(t)
-                            signaling_rooms.setdefault(t, set()).add(websocket)
-            elif mtype == "publish":
+                if not isinstance(new_topics, list):
+                    await _signaling_error(websocket, "invalid_topics", "topics must be an array")
+                    continue
+                requested = {t for t in new_topics if isinstance(t, str)}
+                if len(requested) != len(new_topics) or any(not SIGNALING_TOPIC_RE.fullmatch(t) for t in requested):
+                    await _signaling_error(websocket, "invalid_topic", "Invalid signaling topic")
+                    continue
+                if len(topics | requested) > MAX_SIGNALING_TOPICS_PER_CONNECTION:
+                    await _signaling_error(websocket, "too_many_topics", "Too many signaling topics")
+                    continue
+                for topic in requested:
+                    topics.add(topic)
+                    signaling_rooms.setdefault(topic, set()).add(websocket)
+                continue
+
+            if mtype == "unsubscribe":
+                remove = msg.get("topics")
+                if isinstance(remove, list):
+                    for topic in remove:
+                        if topic in topics:
+                            topics.discard(topic)
+                            room = signaling_rooms.get(topic)
+                            if room:
+                                room.discard(websocket)
+                                if not room:
+                                    signaling_rooms.pop(topic, None)
+                continue
+
+            if mtype == "publish":
+                now = time.monotonic()
+                if now - publish_window_started >= 60:
+                    publish_window_started, publish_count = now, 0
+                publish_count += 1
+                if publish_count > MAX_SIGNALING_PUBLISHES_PER_MINUTE:
+                    await _signaling_error(websocket, "rate_limited", "Too many signaling messages")
+                    continue
+
                 topic = msg.get("topic")
-                if (
+                data = msg.get("data")
+                if not (
                     isinstance(topic, str)
+                    and SIGNALING_TOPIC_RE.fullmatch(topic)
                     and topic in topics
-                    and topic.startswith("lp:")
-                    and isinstance(msg.get("data"), dict)
+                    and isinstance(data, dict)
                 ):
-                    data = msg["data"]
-                    # add from= so receivers can ignore their own echo
-                    payload = {"type": "publish", "topic": topic, "data": {**data}}
-                    if isinstance(data.get("from"), str):
-                        payload["data"]["from"] = data["from"]
-                    else:
-                        payload["data"]["from"] = id(websocket)
-                    dead = []
-                    for peer in signaling_rooms.get(topic, set()):
-                        if peer is websocket:
-                            continue  # client filters self-echo via data.from
-                        try:
-                            await peer.send_text(json.dumps(payload))
-                        except Exception:
-                            dead.append(peer)
-                    for peer in dead:
-                        signaling_rooms.get(topic, set()).discard(peer)
+                    await _signaling_error(websocket, "invalid_publish", "Publish requires a subscribed valid topic and object data")
+                    continue
+
+                # Add from= so receivers can ignore their own echo. Keep the
+                # caller's protocol identity for y-webrtc, but bound it.
+                payload_data = {**data}
+                sender = payload_data.get("from")
+                payload_data["from"] = sender[:128] if isinstance(sender, str) else str(id(websocket))
+                payload = {"type": "publish", "topic": topic, "data": payload_data}
+                encoded = json.dumps(payload, separators=(",", ":"))
+                if len(encoded.encode("utf-8")) > MAX_SIGNALING_FRAME_BYTES:
+                    await _signaling_error(websocket, "frame_too_large", "Signaling message is too large")
+                    continue
+
+                dead = []
+                for peer in list(signaling_rooms.get(topic, set())):
+                    if peer is websocket:
+                        continue  # client filters self-echo via data.from
+                    try:
+                        await peer.send_text(encoded)
+                    except Exception:
+                        dead.append(peer)
+                for peer in dead:
+                    signaling_connections.discard(peer)
+                    for peer_topic in list(topics):
+                        signaling_rooms.get(peer_topic, set()).discard(peer)
     except WebSocketDisconnect:
         pass
     except Exception as e:
         logger.warning(f"signaling WS error: {e}")
     finally:
-        for t in topics:
-            room = signaling_rooms.get(t)
+        signaling_connections.discard(websocket)
+        for topic in topics:
+            room = signaling_rooms.get(topic)
             if room:
                 room.discard(websocket)
                 if not room:
-                    signaling_rooms.pop(t, None)
+                    signaling_rooms.pop(topic, None)
 
 
 app.include_router(api_router)

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.16.5] - 2026-09-16 — Signaling hardening
+
+### Security
+- Hardened the WebRTC signaling relay with strict topic validation, a 16-topic connection cap, 64KB frame limits, and a 120-publish-per-minute per-connection limit.
+- Invalid JSON, topics, oversized messages, malformed publishes, and publishes to unsubscribed topics are rejected with explicit error codes.
+- Added regression coverage for valid relay behavior, malformed topics, topic exhaustion, and unauthorized publishing.
+
+### Documentation
+- Updated the README, full security audit, and version metadata for the signaling hardening release.
+
+---
+
 ## [3.16.4] - 2026-09-16 — Security hardening
 
 ### Fixed

@@ -506,6 +506,34 @@ def test_ws_init_does_not_leak_secrets(client):
         assert init["burnAfterViews"] == 3
 
 
+def test_signaling_relay_requires_valid_bounded_topics(client):
+    """The P2P relay accepts valid topics but rejects malformed or excessive ones."""
+    topic = "lp:signal-room:main"
+    with client.websocket_connect("/api/webrtc/signaling") as sender, client.websocket_connect(
+        "/api/webrtc/signaling"
+    ) as receiver:
+        sender.send_json({"type": "subscribe", "topics": [topic]})
+        receiver.send_json({"type": "subscribe", "topics": [topic]})
+        sender.send_json({"type": "publish", "topic": topic, "data": {"from": "peer-a", "signal": "offer"}})
+        message = receiver.receive_json()
+        assert message["type"] == "publish"
+        assert message["topic"] == topic
+        assert message["data"]["signal"] == "offer"
+
+        sender.send_json({"type": "subscribe", "topics": ["lp:bad topic:main"]})
+        assert sender.receive_json()["code"] == "invalid_topic"
+
+        topics = [f"lp:room-{i}:main" for i in range(17)]
+        sender.send_json({"type": "subscribe", "topics": topics})
+        assert sender.receive_json()["code"] == "too_many_topics"
+
+
+def test_signaling_relay_rejects_unsubscribed_publish(client):
+    with client.websocket_connect("/api/webrtc/signaling") as ws:
+        ws.send_json({"type": "publish", "topic": "lp:signal-room:main", "data": {}})
+        assert ws.receive_json()["code"] == "invalid_publish"
+
+
 # ---------------- v3.1.1: handshake disconnect robustness ----------------
 
 def test_ws_vanish_before_init_does_not_leak_room(client):
