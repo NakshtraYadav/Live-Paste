@@ -2,7 +2,7 @@
 
 **Assessment date:** 2026-09-16
 **Repository:** `NakshtraYadav/Live-Paste`
-**Reviewed version:** `3.16.13`
+**Reviewed version:** `3.16.14`
 **Scope:** FastAPI/SQLite/MongoDB backend, WebSockets and WebRTC signaling, file handling, frontend rendering and browser storage, CLI/update/rollback, packaging, CI/CD, and existing regression tests.
 
 ## Executive summary
@@ -101,7 +101,7 @@ The relay previously capped total connections but allowed each socket to subscri
 
 The in-memory limiters work in one process and are covered by tests, but multiple workers/containers have independent counters. Attackers can multiply attempts by distributing requests across workers or IPs. Password lockout state remains process-local.
 
-**Fixes in v3.16.11–v3.16.13:** creation/upload rate limits, password lockout counters, and per-IP WebSocket admission can use Redis through `REDIS_URL`; Redis windows expire automatically and local state remains bounded as an availability fallback. `LIVEPASTE_REQUIRE_REDIS=1` enables fail-closed behavior for these controls. Broader distributed presence and per-paste quotas remain follow-up work.
+**Fixes in v3.16.11–v3.16.14:** creation/upload rate limits, password lockout counters, and per-IP WebSocket admission can use Redis through `REDIS_URL`; Redis windows expire automatically and local state remains bounded as an availability fallback. Each paste now also enforces a 256 active-viewer budget. `LIVEPASTE_REQUIRE_REDIS=1` enables fail-closed behavior for shared controls. Broader distributed presence metrics remain follow-up work.
 
 ### M1 — CORS defaults are broad
 

@@ -1237,6 +1237,11 @@ async def delete_image(
 
 # ---------------- WebSocket room manager ----------------
 PEER_TIMEOUT_SECONDS = 30  # presence entries older than this are treated as gone
+MAX_VIEWERS_PER_PASTE = 256
+
+
+class PasteRoomFull(Exception):
+    """The paste reached its active viewer/socket budget."""
 
 
 class RoomManager:
@@ -1280,10 +1285,13 @@ class RoomManager:
 
     async def join(self, slug: str, ws: WebSocket, can_edit: bool):
         async with self.lock:
-            self.rooms.setdefault(slug, set()).add(ws)
+            room = self.rooms.setdefault(slug, set())
+            if len(room) >= MAX_VIEWERS_PER_PASTE:
+                raise PasteRoomFull()
+            room.add(ws)
             if can_edit:
                 self.editors.setdefault(slug, set()).add(ws)
-            return len(self.rooms[slug]), len(self.editors.get(slug, set()))
+            return len(room), len(self.editors.get(slug, set()))
 
     async def leave(self, slug: str, ws: WebSocket):
         async with self.lock:
@@ -1487,7 +1495,12 @@ async def ws_paste(websocket: WebSocket, slug: str):
         websocket.editorCapability = capability
         websocket.canEdit = can_edit
 
-        await manager.join(slug, websocket, can_edit)
+        try:
+            await manager.join(slug, websocket, can_edit)
+        except PasteRoomFull:
+            await _try_send(websocket, json.dumps({"type": "error", "code": "paste_connection_limit", "message": "This paste has reached its viewer limit"}))
+            await _try_close(websocket, 4429)
+            return
         joined = True
 
         init_msg = {

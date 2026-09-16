@@ -4,7 +4,7 @@
 
 LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Create a paste, share the link, and everyone with the link can view it live — no accounts, no sign-up, no install. Hand out **edit links** to let people type along: edits sync conflict-free (CRDT) so simultaneous typing just works.
 
-- **Version:** see [`VERSION`](./VERSION) — currently **3.16.13**
+- **Version:** see [`VERSION`](./VERSION) — currently **3.16.14**
 - **Release history:** [`CHANGELOG.md`](./CHANGELOG.md)
 - **Security audit:** [`AUDIT.md`](./AUDIT.md) (full-stack review and remediation plan)
 - **Contributing:** [`CONTRIBUTING.md`](./CONTRIBUTING.md)
@@ -265,6 +265,7 @@ All routes are prefixed with `/api`.
 - WebSocket connections validate browser `Origin`; cross-origin frontends must be listed in `CORS_ORIGINS`
 - New clients send WebSocket credentials through the negotiated `lp-auth` subprotocol; legacy query-string credentials remain temporarily supported for compatibility
 - WebSocket admission is capped at **64 connections per IP**, shared through Redis when configured, with cleanup on disconnect
+- Each paste is capped at **256 active viewers/connections** to protect room broadcast and memory capacity
 - Revisions: last **50** snapshots per paste
 
 ## Security model

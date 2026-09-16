@@ -589,6 +589,21 @@ def test_websocket_connection_budget_is_enforced_and_released(client):
         lpc.WS_ADMISSION_LIMIT = real_limit
 
 
+def test_paste_viewer_budget_is_enforced_and_released(client):
+    real_limit = lpc.MAX_VIEWERS_PER_PASTE
+    lpc.MAX_VIEWERS_PER_PASTE = 1
+    try:
+        p = _create(client, content="paste budget")
+        with client.websocket_connect(f"/api/ws/{p['slug']}") as first:
+            assert first.receive_json()["type"] == "init"
+            with client.websocket_connect(f"/api/ws/{p['slug']}") as blocked:
+                assert blocked.receive_json()["code"] == "paste_connection_limit"
+        with client.websocket_connect(f"/api/ws/{p['slug']}") as after_release:
+            assert after_release.receive_json()["type"] == "init"
+    finally:
+        lpc.MAX_VIEWERS_PER_PASTE = real_limit
+
+
 # ---------------- v3.1.1: handshake disconnect robustness ----------------
 
 def test_ws_vanish_before_init_does_not_leak_room(client):

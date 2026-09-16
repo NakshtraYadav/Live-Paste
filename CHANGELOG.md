@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.16.14] - 2026-09-16 — Per-paste connection budgets
+
+### Security
+- Added a 256-active-viewer limit per paste to protect room memory, broadcast fan-out, and server capacity.
+- Connection slots are released on disconnect, and new clients receive a clear `paste_connection_limit` error when a room is full.
+- Added regression coverage for room-full rejection and slot reuse.
+
+### Documentation
+- Updated the README and full security audit for per-paste connection budgets.
+
+---
+
 ## [3.16.13] - 2026-09-16 — WebSocket admission controls
 
 ### Security
