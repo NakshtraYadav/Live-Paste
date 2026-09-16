@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.16.4] - 2026-09-16 — Security hardening
+
+### Fixed
+- Legacy image-delete requests now enforce the same edit authorization as the canonical file-delete endpoint.
+- New password hashes use bcrypt when available or salted, high-iteration PBKDF2-HMAC-SHA256 in minimal installs; legacy SHA-256 hashes remain readable only for migration.
+- Static-file containment uses resolved-path common-root checking instead of a vulnerable string-prefix test.
+- Added stricter response security headers, including Permissions-Policy, cross-domain policy denial, and HTTPS HSTS.
+- Wildcard CORS is now non-credentialed by default; credentialed CORS requires an explicit origin allowlist.
+
+### Security review
+- Replaced the previous short audit with a full-stack assessment in `AUDIT.md`, including threat boundaries, open findings, evidence, and a prioritized P0/P1/P2 remediation plan.
+
+---
+
 ## [3.16.3] - 2026-09-15
 
 ### Fixed

@@ -58,6 +58,24 @@ def test_version(client):
     assert v["version"] and v["version"] != "0.0.0"
 
 
+def test_security_headers(client):
+    response = client.get("/api/health")
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "SAMEORIGIN"
+    assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
+    assert "Permissions-Policy" in response.headers
+    assert response.headers["x-permitted-cross-domain-policies"] == "none"
+
+
+def test_new_password_hash_is_salted_kdf(client):
+    first = lpc.hash_password("correct horse battery staple")
+    second = lpc.hash_password("correct horse battery staple")
+    assert first != second
+    assert first.startswith("$2") or first.startswith("pbkdf2$")
+    assert lpc.check_password("correct horse battery staple", first)
+    assert not lpc.check_password("wrong", first)
+
+
 def test_create_and_get(client):
     p = _create(client, content="hello world")
     assert p["slug"] and p["editToken"]
@@ -215,6 +233,22 @@ def test_legacy_image_endpoint_still_image_only(client):
         data={"editToken": p["editToken"]},
     )
     assert r.status_code == 400
+
+
+def test_legacy_image_delete_requires_edit_rights(client):
+    """The legacy alias must not bypass the canonical file authorization."""
+    p = _create(client, content="x")
+    upload = client.post(
+        f"/api/paste/{p['slug']}/image",
+        files={"file": ("pixel.png", b"not-really-a-png", "image/png")},
+        data={"editToken": p["editToken"]},
+    )
+    assert upload.status_code == 200, upload.text
+    image_id = upload.json()["id"]
+
+    assert client.delete(f"/api/image/{image_id}").status_code == 403
+    assert client.delete(f"/api/image/{image_id}?editToken=wrong").status_code == 403
+    assert client.delete(f"/api/image/{image_id}?editToken={p['editToken']}").status_code == 200
 
 
 def test_locked_paste_cannot_leak_via_sheets_or_revisions(client):

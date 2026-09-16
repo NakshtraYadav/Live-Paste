@@ -446,13 +446,30 @@ except ImportError:  # pragma: no cover — fallback keeps tests running anywher
 def hash_password(password: str) -> str:
     if _HAS_BCRYPT:
         return _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode()
-    return "sha256$" + hashlib.sha256(password.encode()).hexdigest()
+    # Keep password protection strong even in minimal installs without the
+    # optional bcrypt wheel. SHA-256 is retained below only for reading legacy
+    # hashes; new hashes use a salted, deliberately expensive KDF available in
+    # every supported Python build.
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 600_000)
+    return "pbkdf2$" + base64.b64encode(salt).decode() + "$" + base64.b64encode(digest).decode()
 
 
 def check_password(password: str, stored: Optional[str]) -> bool:
     if not stored:
         return True
+    if stored.startswith("pbkdf2$"):
+        try:
+            _, salt_b64, digest_b64 = stored.split("$", 2)
+            salt = base64.b64decode(salt_b64, validate=True)
+            expected = base64.b64decode(digest_b64, validate=True)
+            actual = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 600_000)
+            return secrets.compare_digest(actual, expected)
+        except (ValueError, TypeError):
+            return False
     if stored.startswith("sha256$"):
+        # Legacy unsalted hashes remain readable so existing locked pastes do
+        # not become inaccessible. New passwords never use this format.
         return secrets.compare_digest("sha256$" + hashlib.sha256(password.encode()).hexdigest(), stored)
     if _HAS_BCRYPT:
         try:
@@ -996,7 +1013,21 @@ async def get_image(image_id: str):
 
 
 @api_router.delete("/image/{image_id}")
-async def delete_image(image_id: str):
+async def delete_image(
+    image_id: str,
+    editToken: str = "",
+    clientId: str = "",
+):
+    """Legacy image-delete alias with the same authorization as /api/file.
+
+    Older clients use this route, so it must not bypass the paste ownership
+    check enforced by the canonical file endpoint.
+    """
+    rec = await storage.find_file(image_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="File not found")
+    paste = await get_paste_doc(rec.get("slug", ""))
+    require_user_edit(paste or {}, editToken, clientId)
     return await _delete_file(image_id)
 
 
@@ -1640,6 +1671,10 @@ async def security_headers(request: Request, call_next):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Permissions-Policy", "camera=(), geolocation=(), payment=(), usb=()")
+    response.headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
+    if request.url.scheme == "https":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     response.headers.setdefault(
         "Content-Security-Policy",
         "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; "
@@ -1652,10 +1687,16 @@ async def security_headers(request: Request, call_next):
     return response
 
 
+_cors_origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()]
+_cors_wildcard = _cors_origins == ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    # There are no cookie-based credentials today. Keep wildcard CORS valid
+    # and non-credentialed by default; only an explicit origin allowlist may
+    # opt into credentialed requests for future deployments.
+    allow_credentials=not _cors_wildcard,
+    allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1671,11 +1712,12 @@ if (STATIC_DIR / "index.html").exists() and os.environ.get("LIVEPASTE_SERVE_STAT
             raise HTTPException(status_code=404, detail="Not found")
         candidate = (STATIC_DIR / full_path).resolve()
         # direct asset files at the root of the build (favicon, manifest, ...)
-        if (
-            full_path
-            and candidate.is_file()
-            and str(candidate).startswith(str(STATIC_DIR.resolve()))
-        ):
+        static_root = STATIC_DIR.resolve()
+        try:
+            inside_static = os.path.commonpath((str(candidate), str(static_root))) == str(static_root)
+        except ValueError:
+            inside_static = False
+        if full_path and candidate.is_file() and inside_static:
             # /sw.js must ALWAYS be revalidated or updates never reach clients
             if full_path == "sw.js":
                 return FileResponse(candidate, headers={"Cache-Control": "no-cache"})
