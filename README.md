@@ -4,7 +4,7 @@
 
 LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Create a paste, share the link, and everyone with the link can view it live — no accounts, no sign-up, no install. Hand out **edit links** to let people type along: edits sync conflict-free (CRDT) so simultaneous typing just works.
 
-- **Version:** see [`VERSION`](./VERSION) — currently **3.15.0**
+- **Version:** see [`VERSION`](./VERSION) — currently **3.16.3**
 - **Release history:** [`CHANGELOG.md`](./CHANGELOG.md)
 - **Security audit:** [`AUDIT.md`](./AUDIT.md) (v3.5.1 hardening report)
 - **Contributing:** [`CONTRIBUTING.md`](./CONTRIBUTING.md)
@@ -43,7 +43,7 @@ LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Cre
 - **Dark mode**, line numbers, and a live status bar (lines / chars / size)
 
 **Sharing & privacy**
-- **Edit vs. view links** — the link you share is read-only; a secret edit token (stored only in your browser) controls who can edit. Per-user edit grants: click a peer's avatar to grant or revoke their edit rights live
+- **Edit vs. view links** — the link you share is read-only; a secret edit token (stored only in your browser) controls who can edit. Per-user edit grants: click a peer's avatar to grant or revoke their edit rights live. Edit-link and file-upload actions resolve the token at action time, so creators remain authorized while the first connection is settling
 - **Password lock** — bcrypt-hashed view passwords; the lock applies to every read path (REST, sheets, revisions, WebSocket)
 - **Burn-after-read** — paste self-destructs after N distinct viewers
 - **Optional expiry** — auto-delete after 1 hour / 1 day / 1 week, or keep forever
@@ -110,7 +110,7 @@ Open the URL, type, share the link. That's it.
 | Create a paste | Home page → type → **Create live link** |
 | Add / duplicate / reorder pages | `+` next to the page tabs; hover a tab for actions; arrows reorder |
 | Share read-only link | **Share** menu → *Copy view link* |
-| Share edit access | **Share** menu → *Copy edit link* (creator only) |
+| Share edit access | **Share** menu → *Copy edit link* (creator only; works on LAN HTTP too) |
 | Grant a specific person edit | Click their presence avatar → *Grant edit* (click again to revoke) |
 | Password-protect | Set *View password* at creation; readers unlock once per session |
 | Burn after read | Set *Views before self-destruct* at creation |
@@ -266,7 +266,7 @@ All routes are prefixed with `/api`.
 ## Security model
 
 - Edit tokens and password hashes are redacted from every API/WebSocket payload; view passwords are bcrypt-hashed and enforced on **every** read path (paste, sheets, revisions, WebSocket)
-- Uploads and deletes require server-side edit authorization (not just frontend gating)
+- Uploads and deletes require server-side edit authorization (not just frontend gating); the UI also uses the persisted creator token at action time to avoid handshake races
 - Filenames sanitized; untrusted file types served as forced attachments; strict Content-Security-Policy (no `unsafe-inline` scripts), `nosniff`, `X-Frame-Options: SAMEORIGIN`, tight `Referrer-Policy`
 - `X-Forwarded-For` trusted only behind an explicit `LIVEPASTE_TRUST_PROXY=1` (prevents rate-limit spoofing)
 - Locked pastes: brute-force lockout on password attempts (`too_many_attempts`)

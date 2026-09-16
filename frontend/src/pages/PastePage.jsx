@@ -126,7 +126,10 @@ export default function PastePage() {
   const [isOwner, setIsOwner] = useState(false);
   const [editors, setEditors] = useState([]); // clientIds granted edit permission
   const [localCopyAvailable, setLocalCopyAvailable] = useState(false); // server wiped, we have an offline copy
-  const [editToken, setEditToken] = useState("");
+  // Seed from localStorage synchronously. The first render happens before the
+  // slug effect runs; actions such as upload/copy can otherwise see an empty
+  // token during that short handshake window.
+  const [editToken, setEditToken] = useState(() => editTokenStore.get(slug));
   const [showHistory, setShowHistory] = useState(false);
   const [mdPreview, setMdPreview] = useState(false); // v3.10.0 markdown preview toggle
   const [htmlPreview, setHtmlPreview] = useState(false); // v3.11.0 sandboxed HTML preview
@@ -1041,7 +1044,12 @@ export default function PastePage() {
       }
       const form = new FormData();
       form.append("file", file);
-      if (editToken) form.append("editToken", editToken);
+      // Read the token at action time as well as from React state. The page
+      // opens the socket before the async handshake updates `editToken`; the
+      // old closure therefore uploaded without the creator's token and the
+      // server correctly replied "Edit permission required".
+      const currentEditToken = editTokenStore.get(slug) || editToken;
+      if (currentEditToken) form.append("editToken", currentEditToken);
       const clientId = getIdentity().clientId;
       if (clientId) form.append("clientId", clientId);
       setUploadPct(0);
@@ -1065,7 +1073,7 @@ export default function PastePage() {
         setUploadPct(null);
       }
     },
-    [slug],
+    [slug, editToken],
   );
 
   const uploadFiles = useCallback(
@@ -1134,7 +1142,10 @@ export default function PastePage() {
     applyContent(newContent);
     try {
       await axios.delete(`${API_BASE}/api/file/${file.id}`, {
-        params: { editToken: editToken || "", clientId: getIdentity().clientId || "" },
+        params: {
+          editToken: editTokenStore.get(slug) || editToken || "",
+          clientId: getIdentity().clientId || "",
+        },
       });
       toast.success(`File "${file.name}" deleted`);
     } catch (err) {
@@ -1188,8 +1199,16 @@ export default function PastePage() {
   };
 
   const handleCopyEditLink = async () => {
-    if (!editToken) return;
-    const ok = await copyToClipboard(`${window.location.origin + window.location.pathname}?edit=${editToken}`);
+    // localStorage is the source of truth for the creator token. React state
+    // can briefly lag while the WebSocket handshake is completing.
+    const currentEditToken = editTokenStore.get(slug) || editToken;
+    if (!currentEditToken) {
+      toast.error("Your edit token is unavailable — reload this paste");
+      return;
+    }
+    const editUrl = new URL(window.location.pathname, window.location.origin);
+    editUrl.searchParams.set("edit", currentEditToken);
+    const ok = await copyToClipboard(editUrl.toString());
     if (ok) {
       toast.success("Edit link copied — anyone with it can edit this paste");
       setCopiedEdit(true);
@@ -1276,11 +1295,11 @@ export default function PastePage() {
       { group: "Share", label: "Copy content", run: handleCopyContent, disabled: false, testid: "palette-copy-content" },
       { group: "Share", label: "Fork this paste", run: handleFork, disabled: false, testid: "palette-fork" },
     ];
-    if (canEdit && editToken) {
+    if (canEdit && (editToken || editTokenStore.get(slug))) {
       acts.splice(2, 0, { group: "Share", label: "Copy edit link", run: handleCopyEditLink, disabled: false, testid: "palette-copy-edit-link" });
     }
     return acts;
-  }, [canEdit, editToken, mdPreview, htmlPreview, showHistory, language, content, createSheet, duplicateSheet, handleCopyLink, handleCopyEditLink, handleCopyContent, handleFork]);
+  }, [canEdit, editToken, mdPreview, htmlPreview, showHistory, language, content, slug, createSheet, duplicateSheet, handleCopyLink, handleCopyEditLink, handleCopyContent, handleFork]);
 
   // ---- derived stats ----
   const lineCount = useMemo(() => content.split("\n").length, [content]);
@@ -1525,7 +1544,7 @@ export default function PastePage() {
                     <span className="block text-xs text-muted-foreground">Scan to open on your phone</span>
                   </span>
                 </DropdownMenuItem>
-                {canEdit && editToken && (
+                {canEdit && (editToken || editTokenStore.get(slug)) && (
                   <DropdownMenuItem
                     onSelect={handleCopyEditLink}
                     data-testid="paste-toolbar-copy-edit-link-button"

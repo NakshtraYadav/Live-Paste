@@ -48,13 +48,18 @@ export const copyToClipboard = async (text) => {
     try {
       const ta = document.createElement("textarea");
       ta.value = text;
+      ta.setAttribute("readonly", "");
       ta.style.position = "fixed";
+      ta.style.top = "0";
+      ta.style.left = "-9999px";
       ta.style.opacity = "0";
       document.body.appendChild(ta);
+      ta.focus();
       ta.select();
-      document.execCommand("copy");
+      ta.setSelectionRange(0, ta.value.length);
+      const copied = document.execCommand("copy");
       document.body.removeChild(ta);
-      return true;
+      return copied;
     } catch (err) {
       return false;
     }

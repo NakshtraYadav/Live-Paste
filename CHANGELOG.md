@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.16.3] - 2026-09-15
+
+### Fixed
+- **Creator uploads no longer ask for edit permission during the initial
+  connection race.** The upload action now reads the persisted edit token at
+  click time instead of relying only on React state, which may still be empty
+  while the WebSocket handshake is completing.
+- **Copy edit link works reliably on LAN HTTP and during handshake startup.**
+  The action now resolves the token from the shared local store and uses a
+  robust `execCommand` fallback when `navigator.clipboard` is unavailable or
+  the page is not a secure context. It reports a clear error if the token is
+  genuinely unavailable instead of silently doing nothing.
+- **File deletion uses the same current-token lookup**, keeping creator
+  upload/delete actions consistent across refreshes and reconnects.
+
+### Tests
+- Backend authorization suite remains green: **44/44 offline tests**.
+- Production frontend bundle rebuilt and copied into `livepaste/static` so
+  pip and standalone installs receive the fix.
+
+---
+
 ## [3.16.2] - 2026-09-14
 
 ### Added

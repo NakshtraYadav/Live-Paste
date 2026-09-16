@@ -8,7 +8,7 @@
  *
  * Bump CACHE_VERSION to invalidate everything.
  */
-const CACHE_VERSION = "lp-v3.15.1";
+const CACHE_VERSION = "lp-v3.16.3";
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const DATA_CACHE = `${CACHE_VERSION}-data`;
 
