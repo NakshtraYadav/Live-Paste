@@ -314,10 +314,19 @@ def test_upload_requires_edit_rights(client):
             break
     assert "editors" in seen
     ws.__exit__(None, None, None)
-    ok2 = client.post(
+    # A public clientId is not sufficient after the grant; the derived
+    # capability is required for REST file authorization.
+    no_capability = client.post(
         f"/api/paste/{slug}/file",
         files={"file": ("a.txt", b"x", "text/plain")},
         data={"clientId": "peer-1"},
+    )
+    assert no_capability.status_code == 403
+    capability = lpc.editor_capability(token, "peer-1")
+    ok2 = client.post(
+        f"/api/paste/{slug}/file",
+        files={"file": ("a.txt", b"x", "text/plain")},
+        data={"clientId": "peer-1", "capability": capability},
     )
     assert ok2.status_code == 200, ok2.text
     fid = ok2.json()["id"]

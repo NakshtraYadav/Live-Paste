@@ -81,7 +81,11 @@ import {
   copyToClipboard,
   formatTimeLeft,
 } from "@/lib/constants";
-import { editTokenStore, consumeEditTokenFromUrl } from "@/lib/editToken";
+import {
+  editTokenStore,
+  editorCapabilityStore,
+  consumeEditTokenFromUrl,
+} from "@/lib/editToken";
 import { useRecorder } from "@/hooks/useRecorder";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -130,6 +134,7 @@ export default function PastePage() {
   // slug effect runs; actions such as upload/copy can otherwise see an empty
   // token during that short handshake window.
   const [editToken, setEditToken] = useState(() => editTokenStore.get(slug));
+  const [editorCapability, setEditorCapability] = useState(() => editorCapabilityStore.get(slug));
   const [showHistory, setShowHistory] = useState(false);
   const [mdPreview, setMdPreview] = useState(false); // v3.10.0 markdown preview toggle
   const [htmlPreview, setHtmlPreview] = useState(false); // v3.11.0 sandboxed HTML preview
@@ -171,6 +176,7 @@ export default function PastePage() {
   useEffect(() => {
     document.title = `/${slug} — LivePaste`;
     setEditToken(consumeEditTokenFromUrl(slug));
+    setEditorCapability(editorCapabilityStore.get(slug));
     // Fresh Y.Doc per paste
     ydocRef.current = new Y.Doc();
     setDocVersion((v) => v + 1);
@@ -217,6 +223,8 @@ export default function PastePage() {
     if (token) params.set("token", token);
     if (pw) params.set("pw", pw);
     if (clientId) params.set("clientId", clientId);
+    const capability = editorCapabilityStore.get(slug) || editorCapability;
+    if (capability) params.set("capability", capability);
     const qs = params.toString();
     const ws = new WebSocket(`${WS_BASE}/api/ws/${slug}${qs ? `?${qs}` : ""}`);
     wsRef.current = ws;
@@ -269,6 +277,10 @@ export default function PastePage() {
           if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
           setCanEdit(!!msg.canEdit);
           setIsOwner(!!msg.isOwner);
+          if (msg.editorCapability) {
+            editorCapabilityStore.save(slug, msg.editorCapability);
+            setEditorCapability(msg.editorCapability);
+          }
           setEditors(Array.isArray(msg.editors) ? msg.editors : []);
           setBurnAfterViews(msg.burnAfterViews || null);
           {
@@ -403,6 +415,10 @@ export default function PastePage() {
           break;
         case "presence":
           setViewers(msg.viewers || 1);
+          break;
+        case "editor-capability":
+          editorCapabilityStore.save(slug, msg.capability || "");
+          setEditorCapability(msg.capability || "");
           break;
         case "editors": {
           // v3.3.0: my edit rights may have changed live (grant/revoke).
@@ -1052,6 +1068,8 @@ export default function PastePage() {
       if (currentEditToken) form.append("editToken", currentEditToken);
       const clientId = getIdentity().clientId;
       if (clientId) form.append("clientId", clientId);
+      const currentCapability = editorCapabilityStore.get(slug) || editorCapability;
+      if (currentCapability) form.append("capability", currentCapability);
       setUploadPct(0);
       try {
         const res = await axios.post(`${API_BASE}/api/paste/${slug}/file`, form, {
@@ -1073,7 +1091,7 @@ export default function PastePage() {
         setUploadPct(null);
       }
     },
-    [slug, editToken],
+    [slug, editToken, editorCapability],
   );
 
   const uploadFiles = useCallback(
@@ -1145,6 +1163,7 @@ export default function PastePage() {
         params: {
           editToken: editTokenStore.get(slug) || editToken || "",
           clientId: getIdentity().clientId || "",
+          capability: editorCapabilityStore.get(slug) || editorCapability || "",
         },
       });
       toast.success(`File "${file.name}" deleted`);
@@ -1165,10 +1184,11 @@ export default function PastePage() {
     try {
       setForking(true);
       const clientId = getIdentity().clientId;
+      const capability = editorCapabilityStore.get(slug) || editorCapability;
       const res = await axios.post(
         `${API_BASE}/api/paste/${slug}/fork`,
         { editToken: editToken || "", copyFiles: true },
-        { params: clientId ? { clientId } : {} },
+        { params: { ...(clientId ? { clientId } : {}), ...(capability ? { capability } : {}) } },
       );
       const { slug: newSlug, editToken: newToken } = res.data;
       if (newToken) {

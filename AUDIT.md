@@ -2,7 +2,7 @@
 
 **Assessment date:** 2026-09-16
 **Repository:** `NakshtraYadav/Live-Paste`
-**Reviewed version:** `3.16.7`
+**Reviewed version:** `3.16.8`
 **Scope:** FastAPI/SQLite/MongoDB backend, WebSockets and WebRTC signaling, file handling, frontend rendering and browser storage, CLI/update/rollback, packaging, CI/CD, and existing regression tests.
 
 ## Executive summary
@@ -32,24 +32,18 @@ A legacy image-delete authorization bypass was confirmed and fixed in this pass.
 
 ## Findings and status
 
-### H1 — Client-controlled `clientId` is used as a REST edit capability
+### H1 — Client-controlled `clientId` was used as a REST edit capability
 
-**Status:** Open — architectural redesign required
+**Status:** Fixed in v3.16.8; capability transport still needs URL cleanup
 **Affected areas:** `POST /api/paste/{slug}/file`, `DELETE /api/file/{id}`, legacy image upload/delete aliases, `can_user_edit`, browser presence identity.
 
-The per-user grant feature stores a browser-provided `clientId` in the paste's editor allowlist. REST requests accept `clientId` directly from a form/query parameter and treat a matching value as edit authorization. `clientId` is not a secret, is not bound to a cryptographic key, and is visible through presence messages. Anyone who learns a granted ID can claim it from another browser and upload or delete files.
+The per-user grant feature stores a browser-provided `clientId` in the paste's editor allowlist. Before v3.16.8, REST requests accepted that public identifier as edit authorization. `clientId` is visible through presence messages and could be claimed by another browser.
 
-**Impact:** unauthorized attachment upload/deletion by a viewer who can observe or guess a granted client ID; possible quota exhaustion, content tampering, and destructive modification of a paste. The same conceptual risk applies to any future REST operation that accepts `clientId` as proof.
+**Impact before the fix:** unauthorized attachment upload/deletion by a viewer who could observe or guess a granted client ID; possible quota exhaustion, content tampering, and destructive modification of a paste.
 
-**Why the obvious fix is insufficient:** checking length, format, or `compare_digest` does not make a public browser identifier an authenticator.
+**Fix in v3.16.8:** the server derives an HMAC capability from the paste's secret owner token and the granted client ID. The capability is delivered only to the granted WebSocket and is required alongside the ID for REST file upload/delete/fork operations. A raw client ID alone now receives `403`.
 
-**Required remediation:** choose one of these designs before public deployment:
-
-1. **Signed capability (recommended for the current anonymous model):** the owner grants a client public key, not an ID. The client proves possession by signing a nonce/request; the server stores the public key and verifies signatures. For simpler implementation, issue a random short-lived capability token over the authenticated WebSocket and require it for REST writes.
-2. **Authenticated session:** add accounts or passkey-based sessions and bind grants to a server identity. Use an HttpOnly, Secure, SameSite cookie plus CSRF protection for REST writes.
-3. **Conservative interim policy:** remove `clientId` authorization from REST and require the edit token for uploads/deletes. This preserves security but temporarily removes granted-editor file management.
-
-Do not describe a raw `clientId` as an authorization credential in future documentation.
+**Remaining work:** move the capability and other secrets out of query strings, consider short-lived rotation, and eventually support device public-key capabilities for stronger revocation and multi-device management. Do not describe a raw `clientId` as an authorization credential.
 
 ### H2 — Edit tokens and view passwords appear in URLs
 

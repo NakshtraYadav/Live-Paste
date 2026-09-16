@@ -28,6 +28,27 @@ export const editTokenStore = {
   },
 };
 
+// Short-lived-in-practice capability for a server-granted editor device. It
+// is derived by the server from the owner's secret and must accompany REST
+// file writes; a public clientId alone is never an authorization credential.
+export const editorCapabilityStore = {
+  save: (slug, capability) => {
+    try {
+      if (capability) localStorage.setItem(`lp_editor_cap_${slug}`, capability);
+      else localStorage.removeItem(`lp_editor_cap_${slug}`);
+    } catch (e) {
+      /* private mode */
+    }
+  },
+  get: (slug) => {
+    try {
+      return localStorage.getItem(`lp_editor_cap_${slug}`) || "";
+    } catch (e) {
+      return "";
+    }
+  },
+};
+
 // Accept ?edit=<token> in the URL, persist it, and strip it from the address bar
 // (share-able edit links). Returns the stored token for the slug.
 export const consumeEditTokenFromUrl = (slug) => {

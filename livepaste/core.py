@@ -21,6 +21,7 @@ import base64
 import random
 import string
 import hashlib
+import hmac
 import secrets
 import logging
 import asyncio
@@ -357,12 +358,32 @@ def _allowed_editors(paste: dict) -> list:
     return [e for e in (paste.get("editors") or []) if e]
 
 
-def can_user_edit(paste: dict, edit_token: str = "", client_id: str = "") -> bool:
+def editor_capability(paste_token: str, client_id: str) -> str:
+    """Derive a non-forgeable capability for a granted client identity.
+
+    The raw clientId is public presence metadata, so it is never accepted as
+    REST authorization by itself. The server derives this capability from the
+    paste's secret owner token and delivers it only to the granted socket.
+    """
+    if not paste_token or not client_id:
+        return ""
+    digest = hmac.new(
+        str(paste_token).encode(), str(client_id).encode(), hashlib.sha256
+    ).digest()
+    return base64.urlsafe_b64encode(digest).decode().rstrip("=")
+
+
+def can_user_edit(
+    paste: dict,
+    edit_token: str = "",
+    client_id: str = "",
+    capability: str = "",
+) -> bool:
     """Full edit-rights check used by REST, WebSocket and file endpoints.
 
-    True when any of: legacy paste (no token), matching edit token, or the
-    user's presence clientId is on the paste's per-user editors allowlist
-    (granted live by the owner — v3.3.0).
+    Legacy pastes remain open for compatibility. Token holders are owners.
+    Granted editors must prove possession of the server-derived capability;
+    a public clientId alone is deliberately insufficient.
     """
     token = paste.get("editToken")
     if not token:
@@ -370,12 +391,18 @@ def can_user_edit(paste: dict, edit_token: str = "", client_id: str = "") -> boo
     if edit_token and secrets.compare_digest(str(edit_token), str(token)):
         return True
     if client_id and client_id in _allowed_editors(paste):
-        return True
+        expected = editor_capability(str(token), str(client_id))
+        return bool(capability) and secrets.compare_digest(str(capability), expected)
     return False
 
 
-def require_user_edit(paste: dict, edit_token: str = "", client_id: str = ""):
-    if not can_user_edit(paste, edit_token, client_id):
+def require_user_edit(
+    paste: dict,
+    edit_token: str = "",
+    client_id: str = "",
+    capability: str = "",
+):
+    if not can_user_edit(paste, edit_token, client_id, capability):
         raise HTTPException(status_code=403, detail="Edit permission required (read-only)")
 
 
@@ -621,7 +648,12 @@ async def fork_paste(slug: str, body: ForkBody, request: Request):
         raise HTTPException(status_code=404, detail="Paste not found or expired")
 
     pw_hash = src.get("passwordHash")
-    is_editor = can_user_edit(src, body.editToken, request.query_params.get("clientId", ""))
+    is_editor = can_user_edit(
+        src,
+        body.editToken,
+        request.query_params.get("clientId", ""),
+        request.query_params.get("capability", ""),
+    )
     if not is_editor:
         # Non-editors may fork an unlocked paste; locked ones must know the pw.
         if pw_hash and not check_password(request.query_params.get("pw", ""), pw_hash):
@@ -975,12 +1007,13 @@ async def upload_file(
     request: Request = None,
     editToken: str = Form(""),
     clientId: str = Form(""),
+    capability: str = Form(""),
 ):
     """Upload any file (max 100MB) attached to a paste."""
     paste = await get_paste_doc(slug)
     if not paste:
         raise HTTPException(status_code=404, detail="Paste not found or expired")
-    require_user_edit(paste, editToken, clientId)
+    require_user_edit(paste, editToken, clientId, capability)
     return await _upload_file(slug, file, request)
 
 
@@ -995,13 +1028,14 @@ async def delete_file(
     file_id: str,
     editToken: str = "",
     clientId: str = "",
+    capability: str = "",
 ):
-    """Delete an uploaded file. Requires edit rights on its paste (v3.3.0)."""
+    """Delete an uploaded file. Requires edit rights on its paste."""
     rec = await storage.find_file(file_id)
     if rec is None:
         raise HTTPException(status_code=404, detail="File not found")
     paste = await get_paste_doc(rec.get("slug", ""))
-    require_user_edit(paste or {}, editToken, clientId)
+    require_user_edit(paste or {}, editToken, clientId, capability)
     return await _delete_file(file_id)
 
 
@@ -1014,6 +1048,7 @@ async def upload_image(
     request: Request = None,
     editToken: str = Form(""),
     clientId: str = Form(""),
+    capability: str = Form(""),
 ):
     content_type = file.content_type or ""
     if not content_type.startswith("image/"):
@@ -1021,7 +1056,7 @@ async def upload_image(
     paste = await get_paste_doc(slug)
     if not paste:
         raise HTTPException(status_code=404, detail="Paste not found or expired")
-    require_user_edit(paste, editToken, clientId)
+    require_user_edit(paste, editToken, clientId, capability)
     return await _upload_file(slug, file, request)
 
 
@@ -1035,6 +1070,7 @@ async def delete_image(
     image_id: str,
     editToken: str = "",
     clientId: str = "",
+    capability: str = "",
 ):
     """Legacy image-delete alias with the same authorization as /api/file.
 
@@ -1045,7 +1081,7 @@ async def delete_image(
     if rec is None:
         raise HTTPException(status_code=404, detail="File not found")
     paste = await get_paste_doc(rec.get("slug", ""))
-    require_user_edit(paste or {}, editToken, clientId)
+    require_user_edit(paste or {}, editToken, clientId, capability)
     return await _delete_file(image_id)
 
 
@@ -1144,6 +1180,7 @@ class RoomManager:
                     {"editToken": paste_token, "editors": editors},
                     getattr(ws, "authToken", ""),
                     getattr(ws, "clientId", ""),
+                    getattr(ws, "editorCapability", ""),
                 )
                 if ws.canEdit:
                     eds.add(ws)
@@ -1209,6 +1246,7 @@ async def ws_paste(websocket: WebSocket, slug: str):
     token = websocket.query_params.get("token") or ""
     pw = websocket.query_params.get("pw") or ""
     client_id = websocket.query_params.get("clientId") or ""
+    capability = websocket.query_params.get("capability") or ""
 
     await websocket.accept()
     if not websocket_origin_allowed(websocket):
@@ -1267,11 +1305,12 @@ async def ws_paste(websocket: WebSocket, slug: str):
         is_owner = (not stored) or bool(token) and secrets.compare_digest(token, str(stored))
         # v3.3.0: per-user edit permissions — token holders (owners) can grant
         # edit rights to specific people by their presence clientId.
-        can_edit = can_user_edit(paste, token, client_id)
-        # v3.15.1: carry auth on the socket so rights can be recomputed live
-        # when the owner grants/revokes (see RoomManager.apply_editor_list).
+        can_edit = can_user_edit(paste, token, client_id, capability)
+        # Carry auth on the socket so rights can be recomputed live when the
+        # owner grants/revokes (see RoomManager.apply_editor_list).
         websocket.authToken = token
         websocket.clientId = client_id
+        websocket.editorCapability = capability
         websocket.canEdit = can_edit
 
         await manager.join(slug, websocket, can_edit)
@@ -1285,6 +1324,8 @@ async def ws_paste(websocket: WebSocket, slug: str):
             "isOwner": is_owner,
             "editors": _allowed_editors(paste),
         }
+        if client_id in _allowed_editors(paste) and stored:
+            init_msg["editorCapability"] = editor_capability(str(stored), client_id)
         if burn_note:
             init_msg["burnAfterViews"] = burn_note
         yupdates = await storage.get_yupdates(slug)
@@ -1537,11 +1578,26 @@ async def ws_paste(websocket: WebSocket, slug: str):
                         )
                         continue
                 await storage.update_editors(slug, editors)
+                # A raw clientId is public metadata, so grant a derived
+                # capability to the target socket and use it for live auth.
+                target_capability = editor_capability(str(stored), target) if mtype == "grant-edit" else ""
+                target_peer = None
+                if target:
+                    for peer in list(manager.rooms.get(slug, set())):
+                        if getattr(peer, "clientId", "") == target:
+                            target_peer = peer
+                            peer.editorCapability = target_capability
+                            break
                 # v3.15.1 fix: refresh EVERY socket's live rights against the
                 # new allowlist — the handshake-time value on the granted
                 # peer's loop was previously stale, so its edits were rejected
                 # with `read_only` even after the UI showed unlocked.
                 await manager.apply_editor_list(slug, editors, stored)
+                if target_peer is not None:
+                    await _try_send(
+                        target_peer,
+                        json.dumps({"type": "editor-capability", "capability": target_capability}),
+                    )
                 await manager.broadcast(
                     slug, {"type": "editors", "editors": editors, "changed": target, "granted": mtype == "grant-edit"}
                 )

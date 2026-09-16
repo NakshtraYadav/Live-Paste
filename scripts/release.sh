@@ -66,17 +66,11 @@ PY="${PYTHON:-$SRC_ROOT/.venv/bin/python}"
 say "  Running tests…"
 LIVEPASTE_DATA_DIR="$(mktemp -d)" LIVEPASTE_SERVE_STATIC=0 "$PY" -m pytest tests/ -q >/dev/null \
   || fail "tests failed — fix before releasing"
-say "✓ 44-test suite green"
+say "✓ offline test suite green"
 
 # Bundle checks only make sense in the SOURCE workspace (the push clone
 # has no frontend/build by design — livepaste/static is what ships).
 if [ "$ROOT" = "$SRC_ROOT" ]; then
-  if [ -d frontend/build/assets ]; then
-    BUILT=$(find frontend/build/assets -name 'index-*.js' -newer VERSION 2>/dev/null | head -1)
-    if [ -n "$BUILT" ]; then
-      say "  ⚠ frontend/build newer than VERSION — run: (cd frontend && yarn build) && rm -rf livepaste/static && cp -R frontend/build livepaste/static"
-    fi
-  fi
   if [ -d livepaste/static ] && [ -d frontend/build ]; then
     cmp -s frontend/build/index.html livepaste/static/index.html \
       || say "  ⚠ livepaste/static differs from frontend/build (bundle may be stale)"

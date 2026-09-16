@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.16.8] - 2026-09-16 — Signed editor capabilities
+
+### Security
+- Replaced raw `clientId` REST authorization with server-derived HMAC capabilities for granted editors.
+- Granted peers receive their capability privately over the collaboration socket; uploads, deletes, and file-copying forks now require the capability alongside the public client ID.
+- Added regression coverage proving that a known/granted client ID alone cannot authorize REST file operations.
+
+### Documentation
+- Updated the README and full security audit for capability-based editor authorization.
+- Release preflight now validates the generated bundle by content instead of producing a false timestamp warning after a version bump.
+
+---
+
 ## [3.16.7] - 2026-09-16 — Security CI foundation
 
 ### Added
