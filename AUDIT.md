@@ -2,7 +2,7 @@
 
 **Assessment date:** 2026-09-16
 **Repository:** `NakshtraYadav/Live-Paste`
-**Reviewed version:** `3.16.6`
+**Reviewed version:** `3.16.7`
 **Scope:** FastAPI/SQLite/MongoDB backend, WebSockets and WebRTC signaling, file handling, frontend rendering and browser storage, CLI/update/rollback, packaging, CI/CD, and existing regression tests.
 
 ## Executive summary
@@ -138,11 +138,11 @@ SHA-256 verification is useful, but the checksum file is fetched from the same G
 
 ### M5 — CI/CD dependency and action trust is incomplete
 
-**Status:** Open
+**Status:** Partially fixed in v3.16.7; action pinning and signed provenance remain
 
-CI runs the backend tests but does not enforce dependency auditing, secret scanning, SAST, frontend audit, SBOM generation, or pinned third-party action SHAs. The release workflow grants `contents: write` at workflow scope and uses mutable action tags.
+CI now has a dedicated security workflow that runs backend regression tests, `pip-audit`, high-confidence Bandit analysis, frontend dependency auditing, and a production frontend build on pushes, pull requests, and a weekly schedule. The release workflow still uses mutable action tags and does not yet publish SBOM/provenance or signed artifacts.
 
-**Remediation:** add `pip-audit`, `npm/yarn audit` policy, Bandit/Ruff or equivalent SAST, Semgrep rules for auth/file paths, Gitleaks, Trivy/Syft SBOM generation, artifact signing, and a protected release environment. Pin every action to a full commit SHA and scope write permissions to the release job only.
+**Remaining remediation:** pin every action to a full commit SHA, add secret scanning and Semgrep rules for auth/file paths, add Trivy/Syft SBOM generation, sign artifacts, and use a protected release environment. Scope write permissions to the release job only.
 
 ### M6 — Frontend code execution is isolated but not a security boundary for secrets
 

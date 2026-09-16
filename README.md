@@ -4,7 +4,7 @@
 
 LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Create a paste, share the link, and everyone with the link can view it live — no accounts, no sign-up, no install. Hand out **edit links** to let people type along: edits sync conflict-free (CRDT) so simultaneous typing just works.
 
-- **Version:** see [`VERSION`](./VERSION) — currently **3.16.6**
+- **Version:** see [`VERSION`](./VERSION) — currently **3.16.7**
 - **Release history:** [`CHANGELOG.md`](./CHANGELOG.md)
 - **Security audit:** [`AUDIT.md`](./AUDIT.md) (full-stack review and remediation plan)
 - **Contributing:** [`CONTRIBUTING.md`](./CONTRIBUTING.md)
@@ -280,7 +280,11 @@ All routes are prefixed with `/api`.
 # backend
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e . pytest httpx
-pytest tests/ -q                # offline suite (41 tests, ~1s, no network)
+pytest tests/ -q                # offline suite (49 tests, ~10s, no network)
+
+# Security checks (also run in GitHub Actions)
+pip-audit
+bandit -r livepaste backend -ll -ii
 
 # frontend (Vite)
 cd frontend && yarn install

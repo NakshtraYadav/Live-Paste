@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.16.7] - 2026-09-16 — Security CI foundation
+
+### Added
+- Added a dedicated GitHub Actions security workflow for backend regression tests, `pip-audit`, high-confidence Bandit analysis, frontend dependency auditing, and production frontend builds on pushes, pull requests, and a weekly schedule.
+- Added local security-check commands to the development documentation.
+
+### Security
+- Security checks run with read-only repository permissions and are separate from the release workflow.
+
+### Documentation
+- Updated the README and full security audit for the new security CI foundation.
+
+---
+
 ## [3.16.6] - 2026-09-16 — WebSocket origin hardening
 
 ### Security

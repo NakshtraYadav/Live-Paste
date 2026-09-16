@@ -1,0 +1,62 @@
+name: Security checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  python-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install application and security tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pytest httpx pip-audit bandit
+
+      - name: Run backend tests
+        env:
+          LIVEPASTE_DATA_DIR: ${{ runner.temp }}/lp-security-data
+          LIVEPASTE_SERVE_STATIC: "0"
+        run: pytest tests/ -q --tb=short
+
+      - name: Audit installed Python dependencies
+        run: pip-audit
+
+      - name: Run high-confidence security analysis
+        run: bandit -r livepaste backend -ll -ii
+
+  frontend-security:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: Install frontend dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Audit production dependencies
+        run: yarn audit --groups dependencies
+
+      - name: Build frontend
+        run: yarn build
