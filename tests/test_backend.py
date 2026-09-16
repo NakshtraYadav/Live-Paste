@@ -534,6 +534,21 @@ def test_signaling_relay_rejects_unsubscribed_publish(client):
         assert ws.receive_json()["code"] == "invalid_publish"
 
 
+def test_websocket_origin_policy_rejects_untrusted_browser_origin(client):
+    p = _create(client, content="origin policy")
+    with client.websocket_connect(
+        f"/api/ws/{p['slug']}", headers={"origin": "https://evil.example"}
+    ) as ws:
+        error = ws.receive_json()
+        assert error["code"] == "origin_not_allowed"
+
+    with client.websocket_connect(
+        "/api/webrtc/signaling", headers={"origin": "https://evil.example"}
+    ) as ws:
+        error = ws.receive_json()
+        assert error["code"] == "origin_not_allowed"
+
+
 # ---------------- v3.1.1: handshake disconnect robustness ----------------
 
 def test_ws_vanish_before_init_does_not_leak_room(client):

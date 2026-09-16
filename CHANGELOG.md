@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.16.6] - 2026-09-16 — WebSocket origin hardening
+
+### Security
+- Added browser `Origin` validation to paste WebSockets and the WebRTC signaling relay.
+- Same-origin browser connections are accepted by default; cross-origin frontends must be explicitly listed in `CORS_ORIGINS`, while native clients without an Origin header remain supported.
+- Added regression coverage for rejected untrusted origins on both WebSocket surfaces.
+
+### Documentation
+- Updated the README and full security audit for the WebSocket origin policy.
+
+---
+
 ## [3.16.5] - 2026-09-16 — Signaling hardening
 
 ### Security

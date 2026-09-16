@@ -2,7 +2,7 @@
 
 **Assessment date:** 2026-09-16
 **Repository:** `NakshtraYadav/Live-Paste`
-**Reviewed version:** `3.16.5`
+**Reviewed version:** `3.16.6`
 **Scope:** FastAPI/SQLite/MongoDB backend, WebSockets and WebRTC signaling, file handling, frontend rendering and browser storage, CLI/update/rollback, packaging, CI/CD, and existing regression tests.
 
 ## Executive summary
@@ -113,13 +113,13 @@ The default remains `CORS_ORIGINS=*` for self-hosting compatibility. It is now n
 
 **Production requirement:** set an exact origin allowlist, do not use `*`, and keep credentials disabled unless a reviewed session design requires them. Add automated deployment checks that reject wildcard CORS in hosted mode.
 
-### M2 — WebSocket Origin is not validated
+### M2 — WebSocket Origin was not validated
 
-**Status:** Open — defense in depth
+**Status:** Fixed in v3.16.6; deployment allowlist still required
 
-WebSockets do not automatically receive browser CORS protection. The application currently relies on token/password knowledge rather than an Origin policy. Since edit tokens are URL credentials, a leaked token remains usable from any origin.
+WebSockets do not automatically receive browser CORS protection. Before v3.16.6 the application relied on token/password knowledge rather than an Origin policy. Since edit tokens are URL credentials, a leaked token remained usable from any origin.
 
-**Remediation:** validate `Origin` against an explicit allowlist during WebSocket handshake. Decide and document behavior for native clients and LAN HTTP. Origin validation is not a replacement for proper authentication.
+**Fix in v3.16.6:** browser connections with an Origin header must match the explicit `CORS_ORIGINS` allowlist; under wildcard/default self-hosting, only the request Host's HTTP/HTTPS origins are accepted. Native clients that omit Origin remain supported. Origin validation is defense in depth, not a replacement for moving secrets out of URLs.
 
 ### M3 — Passwords in REST query parameters can be logged
 

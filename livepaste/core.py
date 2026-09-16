@@ -272,6 +272,24 @@ def client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def websocket_origin_allowed(websocket: WebSocket) -> bool:
+    """Allow same-origin browsers or an explicitly configured frontend origin.
+
+    Native clients often omit Origin, so a missing header remains supported.
+    Wildcard CORS does not make arbitrary browser origins trustworthy: with the
+    default wildcard setting, only the request Host's HTTP/HTTPS origins are
+    accepted. Cross-origin frontend development/hosting must set CORS_ORIGINS.
+    """
+    origin = websocket.headers.get("origin")
+    if not origin:
+        return True
+    configured = [o.strip().rstrip("/") for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()]
+    if configured != ["*"]:
+        return origin.rstrip("/") in configured
+    host = websocket.headers.get("host", "")
+    return origin.rstrip("/") in (f"http://{host}", f"https://{host}")
+
+
 # ---------------- Models ----------------
 class PasteCreate(BaseModel):
     content: str = ""
@@ -1193,6 +1211,10 @@ async def ws_paste(websocket: WebSocket, slug: str):
     client_id = websocket.query_params.get("clientId") or ""
 
     await websocket.accept()
+    if not websocket_origin_allowed(websocket):
+        await _try_send(websocket, json.dumps({"type": "error", "code": "origin_not_allowed", "message": "WebSocket origin is not allowed"}))
+        await _try_close(websocket, 4403)
+        return
 
     try:
         paste = await get_paste_doc(slug)
@@ -1607,6 +1629,10 @@ async def ws_signaling(websocket: WebSocket):
         await websocket.accept()
     except Exception:
         return  # client vanished during the upgrade handshake
+    if not websocket_origin_allowed(websocket):
+        await _signaling_error(websocket, "origin_not_allowed", "WebSocket origin is not allowed")
+        await _try_close(websocket, 4403)
+        return
     if len(signaling_connections) >= MAX_SIGNALING_CONNECTIONS:
         await _signaling_error(websocket, "capacity", "Signaling relay at capacity")
         await _try_close(websocket, 1013)
