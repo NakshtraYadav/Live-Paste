@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as Y from "yjs";
-import { WS_BASE } from "@/lib/constants";
 
 /**
  * Bridges a Yjs doc over LivePaste's existing WebSocket protocol.
@@ -23,10 +22,9 @@ import { WS_BASE } from "@/lib/constants";
  * `s:yupdate` messages — and incoming plain `yupdate`s are only applied while
  * "main" is the active sheet, so multi-sheet docs never cross-contaminate.
  */
-export default function useCollab({ wsRef, slug, canEdit, enabled, ydocRef, docVersion = 0, sheetRef }) {
+export default function useCollab({ wsRef, enabled, ydocRef, docVersion = 0, sheetRef }) {
   const ytext = useMemo(
     () => (ydocRef.current ? ydocRef.current.getText("content") : null),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [ydocRef, docVersion],
   );
   const pendingRef = useRef([]);
@@ -55,7 +53,7 @@ export default function useCollab({ wsRef, slug, canEdit, enabled, ydocRef, docV
         const msg = sid === "main" ? { type: "yupdate" } : { type: "s:yupdate", sheetId: sid };
         try {
           ws.send(JSON.stringify({ ...msg, updateB64: encode(update) }));
-        } catch (e) {
+        } catch {
           /* ignore */
         }
       }
@@ -90,7 +88,7 @@ export default function useCollab({ wsRef, slug, canEdit, enabled, ydocRef, docV
         for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
         Y.applyUpdate(doc, bytes, "remote");
         return true;
-      } catch (e) {
+      } catch {
         return false;
       }
     };
@@ -99,7 +97,7 @@ export default function useCollab({ wsRef, slug, canEdit, enabled, ydocRef, docV
       let msg;
       try {
         msg = JSON.parse(event.data);
-      } catch (e) {
+      } catch {
         return;
       }
       if (msg.type === "init" && Array.isArray(msg.yUpdatesB64) && msg.yUpdatesB64.length) {

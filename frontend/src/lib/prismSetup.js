@@ -33,7 +33,7 @@ export const highlightCode = (code, language) => {
   if (language && language !== "plaintext" && Prism.languages[language]) {
     try {
       return Prism.highlight(code, Prism.languages[language], language);
-    } catch (e) {
+    } catch {
       return escapeHtml(code);
     }
   }

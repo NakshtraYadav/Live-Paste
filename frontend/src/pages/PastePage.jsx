@@ -18,7 +18,6 @@ import {
   UploadCloud,
   History,
   KeyRound,
-  Pencil,
   Eye as EyeIcon,
   X,
   CloudOff,
@@ -97,7 +96,7 @@ const encodeWebSocketAuth = (payload) => {
   const bytes = new TextEncoder().encode(JSON.stringify(payload));
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/=/g, "").replace(/\\+/g, "-").replace(/\\//g, "_");
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 };
 
 const formatBytes = (bytes) => {
@@ -551,7 +550,6 @@ export default function PastePage() {
       window.removeEventListener("pagehide", bye);
       window.removeEventListener("beforeunload", bye);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ---- expiry countdown ----
@@ -573,8 +571,6 @@ export default function PastePage() {
   // ---- CRDT plumbing (active once the WS is up) ----
   const { ytext, remotePulse } = useCollab({
     wsRef,
-    slug,
-    canEdit,
     enabled: status !== "notfound" && status !== "expired",
     ydocRef,
     docVersion,
@@ -752,7 +748,6 @@ export default function PastePage() {
       contentRef.current = txt;
       applyingRemoteRef.current = false;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [remotePulse, status, ytext]);
 
   // ---- send edits over WS (CRDT deltas; full-text as periodic backup) ----

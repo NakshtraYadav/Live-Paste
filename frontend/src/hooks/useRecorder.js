@@ -53,13 +53,13 @@ export function useRecorder({ onComplete }) {
           try {
             const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
             for (const track of mic.getAudioTracks()) stream.addTrack(track);
-          } catch (e) {
+          } catch {
             /* mic denied — screen-only recording is fine */
           }
         } else {
           stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         }
-      } catch (e) {
+      } catch {
         return "denied";
       }
       streamRef.current = stream;
@@ -77,14 +77,14 @@ export function useRecorder({ onComplete }) {
       const mimeType = mimeCandidates.find((m) => {
         try {
           return MediaRecorder.isTypeSupported(m);
-        } catch (e) {
+        } catch {
           return false;
         }
       });
       let rec;
       try {
         rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      } catch (e) {
+      } catch {
         stopStream();
         return "unsupported";
       }

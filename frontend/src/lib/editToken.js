@@ -8,21 +8,21 @@ export const editTokenStore = {
   save: (slug, token) => {
     try {
       localStorage.setItem(`lp_edit_${slug}`, token);
-    } catch (e) {
+    } catch {
       /* private mode */
     }
   },
   get: (slug) => {
     try {
       return localStorage.getItem(`lp_edit_${slug}`) || "";
-    } catch (e) {
+    } catch {
       return "";
     }
   },
   clear: (slug) => {
     try {
       localStorage.removeItem(`lp_edit_${slug}`);
-    } catch (e) {
+    } catch {
       /* ignore */
     }
   },
@@ -36,14 +36,14 @@ export const editorCapabilityStore = {
     try {
       if (capability) localStorage.setItem(`lp_editor_cap_${slug}`, capability);
       else localStorage.removeItem(`lp_editor_cap_${slug}`);
-    } catch (e) {
+    } catch {
       /* private mode */
     }
   },
   get: (slug) => {
     try {
       return localStorage.getItem(`lp_editor_cap_${slug}`) || "";
-    } catch (e) {
+    } catch {
       return "";
     }
   },
@@ -66,7 +66,7 @@ export const consumeEditTokenFromUrl = (slug) => {
         `${window.location.pathname}${params.toString() ? `?${params}` : ""}`,
       );
     }
-  } catch (e) {
+  } catch {
     /* ignore */
   }
   return editTokenStore.get(slug);

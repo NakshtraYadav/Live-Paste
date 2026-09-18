@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.17.0] - 2026-09-18 — Critical paste-page fix, security audit & hardening
+
+### Fixed
+- **Critical:** every paste page rendered a blank white screen. A corrupted regex escape in the WebSocket auth encoder (`encodeWebSocketAuth`) threw a SyntaxError that unmounted the whole React tree. The encoder now uses escape-proof `replaceAll` string operations, and regression tests pin the fix (`PastePage.test.jsx`).
+- The update banner could never load: CSP `connect-src` blocked `https://api.github.com`. The origin is now allowed, and the request completes (it returns 404 until a release is published, which the UI handles by design).
+- `POST /api/paste` now accepts explicit `null`/empty-string `language` and `expiry` from raw API callers, normalizing to defaults; real validation still applies (invalid expiry remains a 400).
+- Added `yarn sync` — one-step frontend build + copy into `livepaste/static` — preventing the stale-bundle drift that shipped outdated assets.
+
+### Security
+- Deep security audit performed with **32 live black-box probes** against a running server (path traversal, authorization bypass, credential impersonation, brute force, stored XSS, burn-after-read atomicity, rate limits). Results: 31/32 pass; no exploitable hole found. Report committed as [`SECURITY_AUDIT_REPORT.md`](./SECURITY_AUDIT_REPORT.md).
+- Added `scripts/security_probe.py` — a repeatable live-attack harness (runs against any server via `LIVEPASTE_BASE_URL`) for local hardening and CI.
+
+### Tests
+- Backend: 52 → **56 tests** (CSP regression, API normalization ×3).
+- Frontend: 0 → **4 tests** (paste page render, React tree stability, base64url auth-token shape, test infra via vitest + testing-library).
+
+### Documentation
+- Added [`SECURITY_AUDIT_REPORT.md`](./SECURITY_AUDIT_REPORT.md) — empirical audit with evidence tables and a prioritized remediation plan.
+- Added `AGENTS.md` — AI-agent workflow guide (gstack digest + project verify commands).
+
+---
+
 ## [3.16.14] - 2026-09-16 — Per-paste connection budgets
 
 ### Security

@@ -32,12 +32,12 @@ self.onmessage = (e) => {
       if (depth > 3) return "{...}";
       try {
         return "{ " + Object.entries(v).map(([k, x]) => k + ": " + fmt(x, depth + 1)).join(", ") + " }";
-      } catch (err) { return String(v); }
+      } catch { return String(v); }
     }
     return String(v);
   };
   const push = (level, args) => {
-    try { logs.push({ level, text: args.map((a) => fmt(a)).join(" ") }); } catch (err) {}
+    try { logs.push({ level, text: args.map((a) => fmt(a)).join(" ") }); } catch {}
   };
   const console = {
     log: (...a) => push("log", a),
@@ -60,7 +60,7 @@ self.onmessage = (e) => {
     let out = "";
     if (result !== undefined) out = "⇒ " + fmt(result);
     self.postMessage({ ok: true, logs, result: out });
-  } catch (err) {
+  } catch {
     clearTimeout(timer);
     logs.push({ level: "error", text: (err && err.stack) || String(err) });
     self.postMessage({ ok: false, logs, error: (err && err.message) || String(err) });
@@ -78,7 +78,7 @@ function runJavaScript(code, timeoutMs = 5000) {
     let worker;
     try {
       worker = new Worker(jsWorkerUrl);
-    } catch (e) {
+    } catch {
       resolve({ ok: false, logs: [], error: "Could not start the sandbox worker" });
       return;
     }
@@ -128,7 +128,7 @@ self.onmessage = async (e) => {
     let result = await py.runPythonAsync(code);
     if (result === undefined || result === null) result = "";
     self.postMessage({ id, ok: true, logs, result: result && result.toString ? String(result) : "" });
-  } catch (err) {
+  } catch {
     self.postMessage({ id, ok: false, logs, error: String(err.message || err) });
   }
 };
@@ -158,7 +158,7 @@ function runPython(code, timeoutMs = 30000) {
     let worker;
     try {
       worker = getPyWorker();
-    } catch (e) {
+    } catch {
       resolve({ ok: false, logs: [], error: "Could not start the Python sandbox" });
       return;
     }
@@ -166,7 +166,7 @@ function runPython(code, timeoutMs = 30000) {
     const timer = setTimeout(() => {
       pyPending.delete(id);
       // A hung Pyodide can't be interrupted safely — restart the worker.
-      try { worker.terminate(); } catch (err) { /* ignore */ }
+      try { worker.terminate(); } catch { /* ignore */ }
       pyWorker = null;
       resolve({ ok: false, logs: [], error: "Execution timed out" });
     }, timeoutMs);

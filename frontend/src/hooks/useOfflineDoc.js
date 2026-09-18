@@ -26,7 +26,7 @@ export function useOfflineDoc({ slug, ydocRef, docVersion, sheetRef, enabled }) 
     return () => {
       try {
         idb.destroy();
-      } catch (e) {
+      } catch {
         /* ignore */
       }
     };
@@ -44,7 +44,7 @@ export async function hasOfflineDoc(slug, sheetId = "main") {
   try {
     const text = await readOfflineDoc(slug, sheetId, 1200);
     return Boolean(text && text.length > 0);
-  } catch (e) {
+  } catch {
     return false;
   }
 }
@@ -68,7 +68,7 @@ export async function readOfflineDoc(slug, sheetId = "main", timeoutMs = 2500) {
   } finally {
     try {
       idb.destroy();
-    } catch (e) {
+    } catch {
       /* ignore */
     }
     doc.destroy();

@@ -68,6 +68,43 @@ def test_security_headers(client):
     assert response.headers["x-permitted-cross-domain-policies"] == "none"
 
 
+def test_csp_allows_update_banner_origin(client):
+    # The frontend update banner fetches the GitHub releases API; CSP must
+    # allow it (regression: blocked by connect-src, banner silently dead).
+    csp = client.get("/api/health").headers["content-security-policy"]
+    assert "https://api.github.com" in csp
+
+
+# ---------------- create API robustness ----------------
+
+
+def test_create_accepts_null_optional_fields(client):
+    # Raw API callers may send explicit nulls; UI sends strings. Both must work.
+    res = client.post(
+        "/api/paste",
+        json={"content": "null-fields", "language": None, "expiry": None},
+    )
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert data["language"] == "plaintext"
+    assert data["expiresAt"] is None
+
+
+def test_create_accepts_empty_string_fields(client):
+    res = client.post(
+        "/api/paste",
+        json={"content": "empty-strings", "language": "", "expiry": ""},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["language"] == "plaintext"
+
+
+def test_create_still_rejects_invalid_expiry(client):
+    # Normalization only fills absent values — real validation still applies.
+    res = client.post("/api/paste", json={"expiry": "banana"})
+    assert res.status_code == 400
+
+
 def test_new_password_hash_is_salted_kdf(client):
     first = lpc.hash_password("correct horse battery staple")
     second = lpc.hash_password("correct horse battery staple")

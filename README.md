@@ -4,9 +4,9 @@
 
 LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Create a paste, share the link, and everyone with the link can view it live — no accounts, no sign-up, no install. Hand out **edit links** to let people type along: edits sync conflict-free (CRDT) so simultaneous typing just works.
 
-- **Version:** see [`VERSION`](./VERSION) — currently **3.16.14**
+- **Version:** see [`VERSION`](./VERSION) — currently **3.17.0**
 - **Release history:** [`CHANGELOG.md`](./CHANGELOG.md)
-- **Security audit:** [`AUDIT.md`](./AUDIT.md) (full-stack review and remediation plan)
+- **Security audit:** [`AUDIT.md`](./AUDIT.md) (full-stack review and remediation plan) · [`SECURITY_AUDIT_REPORT.md`](./SECURITY_AUDIT_REPORT.md) (empirical v3.17.0 audit with live-probe evidence)
 - **Contributing:** [`CONTRIBUTING.md`](./CONTRIBUTING.md)
 
 ---

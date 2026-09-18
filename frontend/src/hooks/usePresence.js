@@ -22,7 +22,8 @@ export default function usePresence({
   wsRef,
   slug,
   enabled,
-  connState, // eslint-disable-line no-unused-vars — re-handshake trigger
+  // connState is intentionally a dependency so reconnects replay the hello handshake.
+  connState,
   canEdit,
   sheetRef,
 }) {
@@ -68,7 +69,7 @@ export default function usePresence({
             },
           }),
         );
-      } catch (e) {
+      } catch {
         /* ignore */
       }
     };
@@ -77,7 +78,7 @@ export default function usePresence({
       let msg;
       try {
         msg = JSON.parse(event.data);
-      } catch (e) {
+      } catch {
         return;
       }
       if (msg.type === "peers" && Array.isArray(msg.p)) {
@@ -149,7 +150,7 @@ export default function usePresence({
           },
         }),
       );
-    } catch (e) {
+    } catch {
       /* ignore */
     }
   };

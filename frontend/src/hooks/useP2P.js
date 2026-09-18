@@ -48,7 +48,7 @@ export default function useP2P({ slug, ydocRef, docVersion = 0, sheetId = "main"
     setP2pStatus("connecting");
     setP2pPeers(0);
 
-    const onPeers = ({ added, removed, webrtcPeers }) => {
+    const onPeers = ({ webrtcPeers }) => {
       setP2pPeers(webrtcPeers ? webrtcPeers.length : 0);
       if (webrtcPeers && webrtcPeers.length > 0) setP2pStatus("connected");
     };
@@ -58,14 +58,13 @@ export default function useP2P({ slug, ydocRef, docVersion = 0, sheetId = "main"
     return () => {
       try {
         provider.destroy();
-      } catch (e) {
+      } catch {
         /* ignore */
       }
       providerRef.current = null;
       setP2pStatus("off");
       setP2pPeers(0);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug, sheetId, ydocRef, docVersion, enabled]);
 
   return { p2pPeers, p2pStatus };

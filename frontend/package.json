@@ -71,8 +71,9 @@
     "start": "vite",
     "dev": "vite",
     "build": "vite build",
+    "sync": "vite build && rm -rf ../livepaste/static && cp -r build ../livepaste/static",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "browserslist": {
     "production": [
@@ -92,6 +93,7 @@
   "devDependencies": {
     "@babel/plugin-proposal-private-property-in-object": "7.21.11",
     "@eslint/js": "9.23.0",
+    "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "6",
     "@testing-library/react": "^16.3.3",
     "@types/lodash": "4.17.24",
@@ -119,7 +121,6 @@
     "diff": "4.0.4",
     "follow-redirects": "1.16.0",
     "path-to-regexp": "0.1.13",
-    "rollup": "2.80.0",
     "underscore": "1.13.8",
     "@babel/plugin-transform-modules-systemjs": "7.29.4",
     "@eslint/plugin-kit": "0.3.4",

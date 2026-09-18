@@ -47,7 +47,7 @@ from fastapi import (
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from . import __version__
 from .storage import create_storage, FileTooLarge, PasteQuotaExceeded, now_utc
@@ -430,6 +430,15 @@ class PasteCreate(BaseModel):
     expiry: str = "never"  # 1h | 1d | 1w | never
     burnAfterViews: Optional[int] = None  # self-destruct after N distinct views
     password: Optional[str] = None  # view password (hashed before storage)
+
+    @field_validator("content", "language", "expiry", mode="before")
+    @classmethod
+    def _absent_to_default(cls, v, info):
+        # API robustness: treat explicit null (or empty string) as "not provided"
+        # so raw API callers get the same defaults the UI sends.
+        if v is None or v == "":
+            return {"content": "", "language": "plaintext", "expiry": "never"}[info.field_name]
+        return v
 
 
 class RestoreBody(BaseModel):
@@ -2023,7 +2032,7 @@ async def security_headers(request: Request, call_next):
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         "script-src 'self' https://cdn.jsdelivr.net; "
-        "worker-src 'self' blob:; connect-src 'self' wss: ws: https://cdn.jsdelivr.net; "
+        "worker-src 'self' blob:; connect-src 'self' wss: ws: https://cdn.jsdelivr.net https://api.github.com; "
         "frame-ancestors 'self'",
     )
     return response

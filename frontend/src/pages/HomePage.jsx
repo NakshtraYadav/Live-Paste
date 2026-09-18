@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { toast } from "sonner";
 import { Link2, Zap, Users, Clock, Flame, Lock, ArrowRight, Loader2 } from "lucide-react";
@@ -18,7 +17,6 @@ import { LANGUAGES, EXPIRY_OPTIONS, API_BASE } from "@/lib/constants";
 import { editTokenStore } from "@/lib/editToken";
 
 export default function HomePage() {
-  const navigate = useNavigate();
   const [content, setContent] = useState("");
   const [customSlug, setCustomSlug] = useState("");
   const [language, setLanguage] = useState("plaintext");
@@ -47,12 +45,18 @@ export default function HomePage() {
         burnAfterViews: burnAfterViews ? Math.max(1, parseInt(burnAfterViews, 10) || 0) : null,
         password: password || null,
       });
-      const slug = res.data.slug;
-      // The creator owns this paste — persist the edit token so they land in
-      // edit mode (not read-only) and can share either link type.
-      editTokenStore.save(slug, res.data.editToken);
+      const slug = typeof res.data?.slug === "string" ? res.data.slug.trim() : "";
+      if (!slug) {
+        throw new Error("The server returned an invalid paste link");
+      }
+      // Persist the creator token before leaving the home route. Use a real
+      // document navigation instead of only changing React Router state: the
+      // packaged FastAPI app serves the SPA fallback at the document boundary,
+      // while a client-side transition could leave a blank route when the
+      // browser has recovered from a stale/failed bundle.
+      editTokenStore.save(slug, res.data.editToken || "");
       toast.success("Your live edit link is ready");
-      navigate(`/${slug}`);
+      window.location.assign(`${window.location.origin}/${encodeURIComponent(slug)}`);
     } catch (err) {
       const msg = err?.response?.data?.detail || "Could not create the link. Please try again.";
       toast.error(msg);

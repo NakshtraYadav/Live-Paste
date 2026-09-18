@@ -1,5 +1,14 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
+# gstack skill suite (symlink to ~/.claude/skills/gstack, local-only)
+/gstack
+
+# Freebuff session tooling logs
+.freebuff/
+
+# Python editable-install metadata
+*.egg-info/
+
 # IDE and editors
 .idea/
 .vscode/

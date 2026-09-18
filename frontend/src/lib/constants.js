@@ -44,7 +44,7 @@ export const copyToClipboard = async (text) => {
   try {
     await navigator.clipboard.writeText(text);
     return true;
-  } catch (e) {
+  } catch {
     try {
       const ta = document.createElement("textarea");
       ta.value = text;
@@ -60,7 +60,7 @@ export const copyToClipboard = async (text) => {
       const copied = document.execCommand("copy");
       document.body.removeChild(ta);
       return copied;
-    } catch (err) {
+    } catch {
       return false;
     }
   }

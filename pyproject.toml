@@ -27,6 +27,9 @@ Homepage = "https://github.com/NakshtraYadav/Live-Paste"
 Repository = "https://github.com/NakshtraYadav/Live-Paste"
 Changelog = "https://github.com/NakshtraYadav/Live-Paste/blob/main/CHANGELOG.md"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.setuptools]
 packages = ["livepaste"]
 include-package-data = true

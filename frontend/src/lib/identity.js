@@ -62,14 +62,14 @@ export function getIdentity() {
     let name = null;
     try {
       name = window.localStorage.getItem(NAME_KEY);
-    } catch (e) {
+    } catch {
       /* private mode */
     }
     if (!name) {
       name = `${pick(ADJECTIVES, n)} ${pick(ANIMALS, n >> 4)}`;
       try {
         window.localStorage.setItem(NAME_KEY, name);
-      } catch (e) {
+      } catch {
         /* ignore */
       }
     }
@@ -91,7 +91,7 @@ export function setDisplayName(name) {
   id.initials = initialsOf(clean);
   try {
     window.localStorage.setItem(NAME_KEY, clean);
-  } catch (e) {
+  } catch {
     /* ignore */
   }
   return id;
