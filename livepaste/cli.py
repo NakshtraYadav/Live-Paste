@@ -32,7 +32,8 @@ def _safe_urlopen(req, timeout):
     url = req.full_url if isinstance(req, urllib.request.Request) else req
     if not isinstance(url, str) or not url.lower().startswith(("http://", "https://")):
         raise ValueError(f"URL scheme not allowed: {url!r}")
-    return urllib.request.urlopen(req, timeout=timeout)
+    # Scheme already validated above — this is the enforcement point.
+    return urllib.request.urlopen(req, timeout=timeout)  # nosec B310
 
 # ---------------------------------------------------------------------------
 # Set this to your public GitHub repository ("owner/repo") once it exists.
@@ -316,7 +317,7 @@ def cmd_start(args):
     print(f"  {TEAL}{BOLD}│{RESET}  {BOLD}⚡ LivePaste v{__version__}{RESET}  {DIM}made by {AUTHOR}{RESET}")
     print(f"  {TEAL}{BOLD}├{line}┤{RESET}")
     print(f"  {TEAL}{BOLD}│{RESET}  Local:    {GREEN}http://localhost:{port}{RESET}")
-    if lan_ip and host in ("0.0.0.0", lan_ip):
+    if lan_ip and host in ("0.0.0.0", lan_ip):  # nosec B104 - comparison, not a bind
         print(f"  {TEAL}{BOLD}│{RESET}  Network:  {GREEN}http://{lan_ip}:{port}{RESET}  {DIM}(share on your Wi-Fi){RESET}")
     data_dir = os.environ.get("LIVEPASTE_DATA_DIR") or os.path.join(os.path.expanduser("~"), ".livepaste")
     if not os.environ.get("MONGO_URL"):
@@ -750,7 +751,7 @@ def cmd_restart(args):
         # checkout is deterministic: the repo package always wins.
         cmd = [
             exe, "-m", "uvicorn", "livepaste.core:app",
-            "--host", "0.0.0.0",
+            "--host", "0.0.0.0",  # nosec B104 - LAN sharing is the product; overridable via --host
             "--port", str(port),
             "--log-level", "warning",
         ]
@@ -902,7 +903,7 @@ def main():
         type=int,
         default=int(os.environ.get("LIVEPASTE_PORT") or read_config().get("PORT") or 8090),
     )
-    p_start.add_argument("--host", default="0.0.0.0", help="Bind address (default 0.0.0.0 = LAN accessible)")
+    p_start.add_argument("--host", default="0.0.0.0", help="Bind address (default 0.0.0.0 = LAN accessible)")  # nosec B104 - LAN sharing is the product
     p_start.add_argument("--data-dir", default=None, help="Where to store pastes (default ~/.livepaste)")
     p_start.add_argument(
         "--keep-data",
