@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **npm:** production dependency audit is now clean (**0 vulnerabilities**, was 2 high / 3 moderate) — `react-router` resolution moved 7.15.1 → ^7.18.2, closing 5 advisories (2 high, 3 moderate) in the production bundle; `js-yaml` removed from direct dependencies
 - **Python:** verified via fresh-install `pip-audit` that all previously flagged packages (starlette, urllib3, requests, click, filelock, msgpack, python-multipart, pytest, pip, setuptools) now resolve to fixed versions on current Python — no pins required
 - Frontend bundle rebuilt with the patched react-router and re-verified in-browser
+- **CI:** Security checks workflow now upgrades setuptools before `pip-audit` (was failing on PYSEC-2026-3447) and the CLI's HTTP fetches go through a scheme-guarded opener (`_safe_urlopen`), resolving all bandit B310 findings
 
 ### Verification
 

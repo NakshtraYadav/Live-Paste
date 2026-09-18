@@ -21,6 +21,19 @@ from . import __version__
 
 AUTHOR = "Nakshtra Yadav"
 
+
+def _safe_urlopen(req, timeout):
+    """urllib opener restricted to http(s) schemes.
+
+    Guards against file:/, ftp:/ and custom-scheme URLs (bandit B310 /
+    CWE-22 class). All call sites in this module build https URLs from a
+    fixed host, so this is defense in depth — the check is authoritative.
+    """
+    url = req.full_url if isinstance(req, urllib.request.Request) else req
+    if not isinstance(url, str) or not url.lower().startswith(("http://", "https://")):
+        raise ValueError(f"URL scheme not allowed: {url!r}")
+    return urllib.request.urlopen(req, timeout=timeout)
+
 # ---------------------------------------------------------------------------
 # Set this to your public GitHub repository ("owner/repo") once it exists.
 # It can also be overridden at runtime:  export LIVEPASTE_REPO="owner/repo"
@@ -99,7 +112,7 @@ def fetch_latest_version(timeout=3, channel=None):
     for branch in branches:
         url = f"https://raw.githubusercontent.com/{slug}/{branch}/VERSION"
         try:
-            with urllib.request.urlopen(url, timeout=timeout) as resp:
+            with _safe_urlopen(url, timeout=timeout) as resp:
                 return resp.read().decode().strip()
         except Exception:
             continue
@@ -114,7 +127,7 @@ def fetch_release_asset(asset_name, timeout=300, tag=None):
         url = f"https://github.com/{slug}/releases/download/{tag}/{asset_name}"
     else:
         url = f"https://github.com/{slug}/releases/latest/download/{asset_name}"
-    with urllib.request.urlopen(url, timeout=timeout) as resp:
+    with _safe_urlopen(url, timeout=timeout) as resp:
         return resp.read()
 
 
@@ -134,7 +147,7 @@ def fetch_release_info(timeout=4):
     url = f"https://api.github.com/repos/{slug}/releases?per_page=20"
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _safe_urlopen(req, timeout=timeout) as resp:
             data = json.load(resp)
     except Exception:
         data = None
@@ -158,7 +171,7 @@ def fetch_release_info(timeout=4):
             f"https://api.github.com/repos/{slug}/tags?per_page=30",
             headers={"Accept": "application/vnd.github+json"},
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _safe_urlopen(req, timeout=timeout) as resp:
             tags = json.load(resp)
         return [
             {"tag": t.get("name") or "", "name": "", "date": "", "summary": "(git tag)"}
@@ -763,7 +776,7 @@ def cmd_restart(args):
     # Wait for the new server to answer
     for _ in range(100):
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1) as resp:
+            with _safe_urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1) as resp:
                 if resp.status == 200:
                     break
         except Exception:
