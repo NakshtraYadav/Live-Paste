@@ -60,10 +60,11 @@ self.onmessage = (e) => {
     let out = "";
     if (result !== undefined) out = "⇒ " + fmt(result);
     self.postMessage({ ok: true, logs, result: out });
-  } catch {
+  } catch (err) {
     clearTimeout(timer);
-    logs.push({ level: "error", text: (err && err.stack) || String(err) });
-    self.postMessage({ ok: false, logs, error: (err && err.message) || String(err) });
+    const message = err && err.message ? err.message : String(err);
+    logs.push({ level: "error", text: (err && err.stack) || message });
+    self.postMessage({ ok: false, logs, error: message });
   }
 };
 `;
@@ -128,8 +129,9 @@ self.onmessage = async (e) => {
     let result = await py.runPythonAsync(code);
     if (result === undefined || result === null) result = "";
     self.postMessage({ id, ok: true, logs, result: result && result.toString ? String(result) : "" });
-  } catch {
-    self.postMessage({ id, ok: false, logs, error: String(err.message || err) });
+  } catch (err) {
+    const message = err && err.message ? err.message : String(err);
+    self.postMessage({ id, ok: false, logs, error: message });
   }
 };
 `;

@@ -4,7 +4,7 @@
 
 LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Create a paste, share the link, and everyone with the link can view it live — no accounts, no sign-up, no install. Hand out **edit links** to let people type along: edits sync conflict-free (CRDT) so simultaneous typing just works.
 
-- **Version:** see [`VERSION`](./VERSION) — currently **3.17.1**
+- **Version:** see [`VERSION`](./VERSION) — currently **3.18.0**
 - **Release history:** [`CHANGELOG.md`](./CHANGELOG.md)
 - **Security audit:** [`AUDIT.md`](./AUDIT.md) (full-stack review and remediation plan) · [`SECURITY_AUDIT_REPORT.md`](./SECURITY_AUDIT_REPORT.md) (empirical v3.17.0 audit with live-probe evidence)
 - **Contributing:** [`CONTRIBUTING.md`](./CONTRIBUTING.md)
@@ -54,16 +54,16 @@ LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Cre
 - **Share any file — literally any** — PDFs, zips, videos, `.exe` binaries, files with no extension, unicode/emoji names. Every type accepted (up to 100 MB each, 500 MB per paste), rendered as clean inline cards
 - **Inline images** — paste, drop, or upload screenshots; they render right at the cursor with hover controls
 - **Video / audio / PDF previews** — play inline instead of a bare download card
-- **Voice & screen notes** — record mic or screen (with mic mix) from the toolbar; uploads behave like any file
+- **Voice & screen notes (experimental)** — record mic or screen where the browser supports MediaRecorder; uploads behave like any file, with browser/MIME support varying by platform
 
 **Offline, P2P & installable**
-- **Offline-first PWA** — installable app; the shell is cached, every paste mirrors to IndexedDB, offline edits queue and auto-merge on reconnect
-- **Peer-to-peer LAN mode** — document data flows browser-to-browser over WebRTC; the server only brokers the handshake
+- **Offline-first PWA (supported shell; advanced sync experimental)** — production builds register the service worker and cache the shell; paste data mirrors to IndexedDB, while offline conflict/recovery behavior remains under active browser validation
+- **Peer-to-peer LAN mode (experimental)** — document data can flow browser-to-browser over WebRTC; the server brokers the handshake and the normal CRDT path remains the fallback
 - **Recovery after server restart** — if an ephemeral server wipes data, the browser offers to restore your local copy
 
 **Productivity**
 - **Multiple pages per paste** — a notebook of named sheets, each with its own content, language, and CRDT state; duplicate and reorder pages
-- **Runnable pastes** — Run button on JavaScript and Python blocks (sandboxed JS worker; Pyodide/WASM) with inline output
+- **Runnable pastes (best-effort client-side execution)** — Run button on JavaScript and Python blocks (worker/Pyodide) with structured error output; this is not a server security sandbox
 - **Markdown preview** — safe, sanitized rendered preview of markdown pastes
 - **Sandboxed HTML preview** — HTML pastes render live in a locked-down iframe
 - **Find & replace** (⌘/Ctrl+H) with match count and case toggle
@@ -71,6 +71,10 @@ LivePaste is an anonymous, real-time collaborative pastebin (dontpad-style). Cre
 - **Slash commands** — `/` at line start for a Notion-style insert menu
 - **Floating emoji reactions** — react and it drifts up everyone's editor with your name and color
 - **Auto language detection** — sensible defaults from content shape
+
+## Support maturity
+
+Core sharing, edit authorization, WebSocket collaboration, files, sheets, password protection, expiry, revisions, and sanitized previews are supported for controlled LAN/self-host use. Offline recovery, P2P, recording, and runnable-code integrations remain experimental or browser-dependent; see [`FEATURE_AUDIT_REPORT.md`](./FEATURE_AUDIT_REPORT.md) and [`PROJECT_PLAN.md`](./PROJECT_PLAN.md) for acceptance criteria and current limitations.
 
 ## Quick start
 
@@ -99,7 +103,7 @@ livepaste start
 
 Open the URL, type, share the link. That's it.
 
-**Temporary by design:** in local mode every session starts clean — stop the server (Ctrl+C) and pastes are wiped. Want persistence? `livepaste config keep-data on`.
+**Persistent by default:** local sessions keep pastes across restarts. For a disposable session, use `livepaste start --ephemeral`; it explicitly clears local data on startup and graceful exit.
 
 ## Feature guide
 
@@ -133,14 +137,14 @@ Open the URL, type, share the link. That's it.
 
 - LivePaste is a **PWA**: install it from the browser menu; the service worker caches the shell (`cache-version` bumps each release so updates propagate).
 - Edits mirror into **IndexedDB**; go offline, keep typing, and changes merge when the connection returns.
-- **P2P mode** (shield toggle in the toolbar): peers on the same network sync over WebRTC data channels, with per-sheet signaling topics; the server relays only handshake offers.
+- **P2P mode** (shield toggle in the toolbar, experimental): peers on the same network can sync over WebRTC data channels, with per-sheet signaling topics; the normal server CRDT path remains available as fallback.
 
 ### Productivity
 
 - **⌘/Ctrl+K** — command palette: add/duplicate pages, find & replace, previews, history, copy links, fork.
 - **⌘/Ctrl+H** — find & replace with match count, case toggle, replace-all.
 - **Markdown / HTML preview** — toggle from the toolbar; both render safely (DOMPurify / sandboxed iframe).
-- **Run blocks** — for JS and Python code blocks in runnable pastes; output shows inline. Code never leaves your machine (WASM sandbox).
+- **Run blocks** (best effort, client-side only) — for JS and Python code blocks; output shows inline. This is not a server security sandbox and should not be treated as safe execution of hostile code.
 
 ## Self-hosting (CLI)
 
@@ -148,11 +152,11 @@ Open the URL, type, share the link. That's it.
 | --- | --- |
 | `livepaste start` | Start the server (LAN-accessible by default) |
 | `livepaste start --port 9000` | Custom port for this run |
-| `livepaste start --keep-data` | Keep pastes between sessions for this run |
+| `livepaste start --ephemeral` | Explicitly clear local pastes on startup and graceful exit |
 | `livepaste start --data-dir ~/pastes` | Store data somewhere else |
 | `livepaste config` | Show settings (port, data-dir, keep-data) |
 | `livepaste config port 9000` | Change the default port permanently |
-| `livepaste config keep-data on` | Make pastes persistent by default |
+| `livepaste start --keep-data` | Compatibility alias for persistent storage |
 | `livepaste autostart enable` | Start LivePaste automatically at login |
 | `livepaste autostart disable` | Remove the login service |
 | `livepaste restart` | Restart the running server safely (verified pid, detached relaunch) |
@@ -340,7 +344,7 @@ Manual equivalent:
 3. Bump `CACHE_VERSION` in `frontend/public/sw.js` — or installed PWAs keep serving the old shell
 4. Commit, tag, and push — the release workflow builds macOS (arm64 + Intel) and Linux (x86_64 + arm64) executables, generates `SHA256SUMS`, and publishes the GitHub Release automatically:
    ```bash
-   git tag v3.17.1 && git push origin main v3.17.1
+   git tag v<VERSION> && git push origin main v<VERSION>
    ```
 
 ## How it works

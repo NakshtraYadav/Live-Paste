@@ -299,11 +299,12 @@ def cmd_start(args):
     elif cfg.get("DATA_DIR"):
         os.environ.setdefault("LIVEPASTE_DATA_DIR", cfg["DATA_DIR"])
 
-    # Session mode: temporary by default in local mode — pastes/images are
-    # wiped on graceful exit AND on the next start (covers force-kills).
-    keep_data = args.keep_data or cfg.get("KEEP_DATA") == "1"
+    # Persistent storage is the safe default. Ephemeral mode is an explicit
+    # opt-in because startup purges can destroy a shared data directory.
+    ephemeral = bool(args.ephemeral or cfg.get("KEEP_DATA") == "0")
+    keep_data = not ephemeral
     if not os.environ.get("MONGO_URL"):
-        os.environ["LIVEPASTE_EPHEMERAL"] = "0" if keep_data else "1"
+        os.environ["LIVEPASTE_EPHEMERAL"] = "1" if ephemeral else "0"
 
     host = args.host
     port = args.port
@@ -325,7 +326,7 @@ def cmd_start(args):
         if keep_data:
             print(f"  {TEAL}{BOLD}│{RESET}  Session:  {DIM}persistent (pastes are kept){RESET}")
         else:
-            print(f"  {TEAL}{BOLD}│{RESET}  Session:  {DIM}temporary — clears on exit (--keep-data to keep){RESET}")
+            print(f"  {TEAL}{BOLD}│{RESET}  Session:  {DIM}EPHEMERAL — clears on exit/start (explicit opt-in){RESET}")
     print(f"  {TEAL}{BOLD}╰{line}╯{RESET}")
     print(f"  {DIM}Press Ctrl+C to stop.{RESET}")
     print()
@@ -728,7 +729,7 @@ def cmd_restart(args):
     data_dir = cfg.get("DATA_DIR") or os.environ.get("LIVEPASTE_DATA_DIR") or os.path.join(os.path.expanduser("~"), ".livepaste", "data")
     os.makedirs(data_dir, exist_ok=True)
     env = dict(os.environ, LIVEPASTE_DATA_DIR=data_dir)
-    if not os.environ.get("MONGO_URL") and cfg.get("KEEP_DATA") != "1":
+    if not os.environ.get("MONGO_URL") and cfg.get("KEEP_DATA") == "0":
         env["LIVEPASTE_EPHEMERAL"] = "1"
     exe = sys.executable
     # v3.5.0: run from THIS checkout — `-m livepaste` with just the interpreter
@@ -908,7 +909,12 @@ def main():
     p_start.add_argument(
         "--keep-data",
         action="store_true",
-        help="Keep pastes/images between sessions (default: cleared on exit)",
+        help="Keep pastes/images between sessions (default: persistent)",
+    )
+    p_start.add_argument(
+        "--ephemeral",
+        action="store_true",
+        help="Explicitly clear local pastes on startup and graceful exit",
     )
     p_start.add_argument("--no-update-check", action="store_true", help="Skip the GitHub update check")
     p_start.set_defaults(func=cmd_start)

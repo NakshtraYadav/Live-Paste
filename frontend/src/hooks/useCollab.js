@@ -22,7 +22,14 @@ import * as Y from "yjs";
  * `s:yupdate` messages — and incoming plain `yupdate`s are only applied while
  * "main" is the active sheet, so multi-sheet docs never cross-contaminate.
  */
-export default function useCollab({ wsRef, enabled, ydocRef, docVersion = 0, sheetRef }) {
+export default function useCollab({
+  wsRef,
+  enabled,
+  ydocRef,
+  docVersion = 0,
+  connectionVersion = 0,
+  sheetRef,
+}) {
   const ytext = useMemo(
     () => (ydocRef.current ? ydocRef.current.getText("content") : null),
     [ydocRef, docVersion],
@@ -129,7 +136,7 @@ export default function useCollab({ wsRef, enabled, ydocRef, docVersion = 0, she
     if (!ws) return undefined;
     ws.addEventListener("message", onMessage);
     return () => ws.removeEventListener("message", onMessage);
-  }, [enabled, wsRef, ydocRef, docVersion, ytext]);
+  }, [enabled, wsRef, ydocRef, docVersion, connectionVersion, ytext]);
 
   return { ytext, remotePulse };
 }

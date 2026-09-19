@@ -121,6 +121,7 @@ export default function PastePage() {
   const [expiresAt, setExpiresAt] = useState(null);
   const [timeLeft, setTimeLeft] = useState(null);
   const [connState, setConnState] = useState("connecting"); // connecting | connected | reconnecting | disconnected
+  const [connectionVersion, setConnectionVersion] = useState(0); // increments for each socket so CRDT listeners rebind
   const [copiedLink, setCopiedLink] = useState(false);
   const [forking, setForking] = useState(false); // v3.7.0
   const [copiedContent, setCopiedContent] = useState(false);
@@ -240,6 +241,7 @@ export default function PastePage() {
       [authProtocol],
     );
     wsRef.current = ws;
+    setConnectionVersion((version) => version + 1);
     activeSheetRef.current = activeSheet;
 
     // Offline cold start: if the handshake never completes (server down, no
@@ -574,6 +576,7 @@ export default function PastePage() {
     enabled: status !== "notfound" && status !== "expired",
     ydocRef,
     docVersion,
+    connectionVersion,
     sheetRef: activeSheetRef,
   });
 

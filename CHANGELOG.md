@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.18.0] - 2026-09-19 — Feature reliability remediation
+
+### Fixed
+
+- Fixed JavaScript and Python runnable-block workers so user exceptions preserve their actual message/stack instead of triggering a secondary undefined-variable error.
+- Fixed collaboration reconnect lifecycle: CRDT message listeners now detach from the previous WebSocket and rebind to each replacement connection.
+- Registered the production service worker from the application entry point and bumped the shell cache version for the release.
+- Changed `livepaste start` to use persistent storage by default; destructive temporary sessions now require explicit `--ephemeral`.
+
+### Documentation
+
+- Updated the README with feature maturity labels for offline sync, P2P, recording, and client-side runnable code.
+- Updated `FEATURE_AUDIT_REPORT.md` and `PROJECT_PLAN.md` with remediation status, remaining browser-validation work, and acceptance criteria.
+
+### Verification
+
+- Backend: 56/56 tests
+- Frontend: 4/4 tests
+- Production build: passed
+- Remaining known warning: frontend main bundle is approximately 969 KB and needs code splitting in a future performance phase.
+
 ## [3.17.1] - 2026-09-18 — Dependency security sweep
 
 ### Security
