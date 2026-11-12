@@ -21,7 +21,6 @@ jobs:
   security:
     uses: ./.github/workflows/security.yml
   build:
-    needs: [verify, security]
     strategy:
       # One leg failing must never cancel the others (v3.16.0: a single
       # broken runner used to cancel every build).
@@ -118,7 +117,7 @@ jobs:
   release:
     permissions:
       contents: write
-    needs: build
+    needs: [verify, security, build]
     runs-on: ubuntu-22.04
     if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish)
     steps:
