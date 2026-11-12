@@ -150,9 +150,7 @@ def test_revisions_recorded_and_restorable(client):
         assert ws.receive_json()["canEdit"] is True
         for i in range(3):
             ws.send_json({"type": "edit", "content": f"rev {i}"})
-            import time
-
-            time.sleep(0.05)
+            assert _recv_until(ws, "sync-ack")["content"] == f"rev {i}"
 
     revs = client.get(f"/api/paste/{slug}/revisions").json()["revisions"]
     assert len(revs) >= 3
@@ -489,9 +487,7 @@ def test_sheet_full_text_edit_persists(client):
     with client.websocket_connect(f"/api/ws/{slug}?token={token}") as ws:
         ws.receive_json()
         ws.send_json({"type": "s:edit", "sheetId": sid, "content": "edited sheet"})
-        import time
-
-        time.sleep(0.1)
+        assert _recv_until(ws, "sync-ack")["content"] == "edited sheet"
 
     assert client.get(f"/api/paste/{slug}/sheets/{sid}").json()["content"] == "edited sheet"
     # main content untouched
