@@ -668,6 +668,10 @@ def cmd_rollback(args):
                 print(f"Already running {tag}.")
                 return
             _update_binary(None, assume_yes=args.yes, tag=tag)
+            if _is_windows():
+                # The installer owns stop/swap/relaunch. A second concurrent
+                # restart here would race its attempt to replace locked files.
+                return
             record_history(__version__, "rollback", summary=f"rolled back from {tag}")
             if args.restart:
                 cmd_restart(args)

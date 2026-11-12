@@ -86,6 +86,18 @@ def test_windows_update_rejects_missing_or_wrong_checksum(monkeypatch, tmp_path)
     popen.assert_not_called()
 
 
+def test_windows_tagged_rollback_lets_installer_manage_restart(monkeypatch):
+    monkeypatch.setattr(cli, "_is_windows", lambda: True)
+    monkeypatch.setattr(cli, "is_frozen", lambda: True)
+    update = Mock()
+    restart = Mock()
+    monkeypatch.setattr(cli, "_update_binary", update)
+    monkeypatch.setattr(cli, "cmd_restart", restart)
+    cli.cmd_rollback(SimpleNamespace(tag="v3.0.0", list=False, yes=True, restart=True))
+    update.assert_called_once_with(None, assume_yes=True, tag="v3.0.0")
+    restart.assert_not_called()
+
+
 def test_windows_login_launcher_quotes_paths_and_registers_current_user_only(monkeypatch, tmp_path):
     import sys
     from contextlib import nullcontext

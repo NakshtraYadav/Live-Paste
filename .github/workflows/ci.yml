@@ -17,6 +17,7 @@ jobs:
       matrix:
         python: ["3.11", "3.14"]
         os: [ubuntu-latest, windows-2025]
+      fail-fast: false
     steps:
       - uses: actions/checkout@v4
 
@@ -30,6 +31,7 @@ jobs:
           pip install -e . pytest httpx build
 
       - name: Run offline test suite
+        timeout-minutes: 5
         env:
           LIVEPASTE_DATA_DIR: ${{ runner.temp }}/lp-ci-data
           LIVEPASTE_SERVE_STATIC: "0"

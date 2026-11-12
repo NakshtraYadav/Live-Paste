@@ -677,9 +677,8 @@ def test_ws_vanish_no_broadcast_crash(client):
     with client.websocket_connect(f"/api/ws/{slug}?token={token}") as alive:
         alive.receive_json()  # init
         alive.send_json({"type": "edit", "content": "still alive"})
-        import time as _t
-
-        _t.sleep(0.1)
+        # Wait for storage acknowledgement, not a platform-dependent delay.
+        assert _recv_until(alive, "sync-ack")["content"] == "still alive"
     assert client.get(f"/api/paste/{slug}").json()["content"] == "still alive"
 
 
