@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.0.0] - 2026-11-12 — Windows, background recovery and reliable collaboration
+
+### Added
+- One-click, per-user Windows 10/11 x64 installer with desktop/Start menu shortcuts, browser launch and automatic sign-in startup. Python and administrator access are not required.
+- Background monitor with an OS-held single-instance lock, crash recovery, bounded restart backoff, health checks and graceful stop. Windows shutdown uses authenticated local control rather than terminating the database process.
+- Cross-platform `background`, `stop` and `status` commands; preserve managed background operation during restart.
+- Four original animated README illustrations, prominent platform downloads and a separate API/CLI reference.
+
+### Fixed
+- Include all document persistence, refresh grant, image, offline reconnect, file-handling and CLI reliability repairs listed in the 3.18.1 repair baseline below.
+- Support Windows socket handoff, process identity checks, Unicode console output, quoted installation paths and locked-executable updates through verified installers.
+- Clean up stopped-process metadata, including after Uvicorn re-raises a termination signal.
+
+### Release validation
+- Test Python 3.11 and 3.14 on Windows and Linux; validate clean wheel installations, background crash recovery, native binaries and Windows installer upgrades/uninstall.
+- Build macOS ARM64/Intel, Linux ARM64/x64, Windows x64 portable executable and Windows setup; publish checksums for all assets after every release job passes.
+
+## [3.18.1] - 2026-11-12 — Unreleased reliability repair baseline (included in 4.0.0)
+
+### Fixed
+- Preserve complete Yjs history during compaction; persist canonical text from CRDT updates and restore through the same document identities.
+- Resynchronize durable offline state after reconnect, retry missing acknowledgements, keep page documents separate, and render incoming image references immediately.
+- Preserve participant identity and granted capabilities across refresh; prevent public-ID capability disclosure and scope encrypted P2P keys to current editors.
+- Complete uploads on the original page after navigation; retain file references on failed deletion, expire downloads with their paste, and support byte-range downloads.
+- Apply password lockout to all read paths, preserve long passwords, protect private metadata, count anonymous burn reads, and purge all ephemeral history.
+- Restart only verified LivePaste processes with their original host, port and storage settings; honor explicit persistence options.
+- Run JavaScript and Python workers with dedicated policies while preserving the editor CSP; choose video MIME types for screen capture.
+
+### Security and releases
+- Require Python 3.11+ so supported web, upload and CRDT packages can receive security fixes; standalone binaries continue to bundle their runtime.
+- Update affected frontend dependencies and the lockfile; production dependency audit reports zero advisories at verification time.
+- Pin binary downloads and checksums to the same release and refuse missing checksums.
+- Gate release builds on backend/frontend/security checks and installed-program smoke tests; update supported macOS runners and rebuild bundled assets from source.
+
+### Tests
+- Add regression coverage for the audited defects, reconnect acknowledgements, refresh grants, delayed uploads, canonical restore/replay, download integrity and clean installed-program restart.
+
+---
+
 ## [3.18.0] - 2026-09-19 — Feature reliability remediation
 
 ### Fixed

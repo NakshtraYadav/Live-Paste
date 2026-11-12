@@ -1,0 +1,13 @@
+yarn run v1.22.22
+$ vitest run --passWithNoTests audit/page-sync.test.jsx
+
+ RUN  v2.1.9 /Users/nakshtrayadav/Documents/Development/Livepaste/frontend
+
+ ✓ audit/page-sync.test.jsx (1 test) 168ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  10:00:06
+   Duration  1.80s (transform 196ms, setup 121ms, collect 559ms, tests 168ms, environment 392ms, prepare 63ms)
+
+Done in 2.68s.

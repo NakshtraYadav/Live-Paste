@@ -1,0 +1,76 @@
+yarn run v1.22.22
+$ vitest run --passWithNoTests audit/
+
+ RUN  v2.1.9 /Users/nakshtrayadav/Documents/Development/Livepaste/frontend
+
+ ❯ audit/known-bugs.test.jsx (2 tests | 2 failed) 26ms
+   × known frontend bug specifications > B06: reconnect init must not merge main-sheet history into an active secondary page 21ms
+     → expected 'MAIN PAGESECOND PAGE' to be 'SECOND PAGE' // Object.is equality
+   × known frontend bug specifications > B18: screen recording must select a video MIME type when video is supported 4ms
+     → expected 'audio/webm;codecs=opus' to match /^video\//
+ ❯ audit/page-sync.test.jsx (1 test | 1 failed) 141ms
+   × B17: secondary-page image updates must immediately render without a full-text backup 141ms
+     → expect(received).toBeInTheDocument()
+
+received value must be an HTMLElement or an SVGElement.
+
+
+ Test Files  2 failed (2)
+      Tests  3 failed (3)
+   Start at  10:00:19
+   Duration  1.96s (transform 210ms, setup 257ms, collect 602ms, tests 168ms, environment 844ms, prepare 149ms)
+
+info Visit https://yarnpkg.com/en/docs/cli/run for documentation about this command.
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  audit/known-bugs.test.jsx > known frontend bug specifications > B06: reconnect init must not merge main-sheet history into an active secondary page
+AssertionError: expected 'MAIN PAGESECOND PAGE' to be 'SECOND PAGE' // Object.is equality
+
+Expected: "SECOND PAGE"
+Received: "MAIN PAGESECOND PAGE"
+
+ ❯ audit/known-bugs.test.jsx:26:20
+     24|     const actual = second.getText("content").toString();
+     25|     mounted.unmount(); main.destroy(); second.destroy();
+     26|     expect(actual).toBe("SECOND PAGE");
+       |                    ^
+     27|   });
+     28|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  audit/known-bugs.test.jsx > known frontend bug specifications > B18: screen recording must select a video MIME type when video is supported
+AssertionError: expected 'audio/webm;codecs=opus' to match /^video\//
+
+- Expected:
+/^video\//
+
++ Received:
+"audio/webm;codecs=opus"
+
+ ❯ audit/known-bugs.test.jsx:49:26
+     47|     mounted.unmount();
+     48|     expect(result).toBe("recording");
+     49|     expect(selectedMime).toMatch(/^video\//);
+       |                          ^
+     50|   });
+     51| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  audit/page-sync.test.jsx > B17: secondary-page image updates must immediately render without a full-text backup
+Error: expect(received).toBeInTheDocument()
+
+received value must be an HTMLElement or an SVGElement.
+
+ ❯ audit/page-sync.test.jsx:52:65
+     50|   remoteDoc.destroy();
+     51|   // No s:edit backup is sent: the CRDT update itself must update the …
+     52|   expect(screen.queryByTestId(`paste-inline-image-${imageId}`)).toBeIn…
+       |                                                                 ^
+     53| });
+     54|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+error Command failed with exit code 1.

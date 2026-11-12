@@ -16,10 +16,23 @@ import socket
 import argparse
 import subprocess
 import urllib.request
+import platform
 
 from . import __version__
 
 AUTHOR = "Nakshtra Yadav"
+
+
+def _is_windows():
+    return platform.system() == "Windows"
+
+
+def _command():
+    return [sys.executable] if is_frozen() else [sys.executable, "-m", "livepaste"]
+
+
+def _child_options():
+    return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)} if _is_windows() else {"start_new_session": True}
 
 
 def _safe_urlopen(req, timeout):
@@ -108,16 +121,21 @@ def fetch_latest_version(timeout=3, channel=None):
     slug = repo_slug()
     if slug.startswith("CHANGE_ME"):
         return None
-    ref = channel if channel and channel != "stable" else None
-    branches = (ref, "main", "master") if ref else ("main", "master")
-    for branch in branches:
-        url = f"https://raw.githubusercontent.com/{slug}/{branch}/VERSION"
+    if not channel or channel == "stable":
         try:
-            with _safe_urlopen(url, timeout=timeout) as resp:
-                return resp.read().decode().strip()
+            req = urllib.request.Request(f"https://api.github.com/repos/{slug}/releases/latest", headers={"Accept": "application/vnd.github+json"})
+            with _safe_urlopen(req, timeout=timeout) as response:
+                tag = json.load(response).get("tag_name", "")
+            value = tag.removeprefix("v") if hasattr(tag, "removeprefix") else tag.lstrip("v")
+            return value if parse_version(value) else None
         except Exception:
-            continue
-    return None
+            return None
+    try:
+        with _safe_urlopen(f"https://raw.githubusercontent.com/{slug}/{channel}/VERSION", timeout=timeout) as response:
+            value = response.read().decode().strip()
+        return value if parse_version(value) else None
+    except Exception:
+        return None
 
 
 def fetch_release_asset(asset_name, timeout=300, tag=None):
@@ -243,8 +261,8 @@ def verify_checksum(data, asset_name, channel=None, tag=None):
     try:
         sums = fetch_release_asset("SHA256SUMS", timeout=30, tag=tag)
     except Exception:
-        print("  ⚠  No SHA256SUMS published for this release — skipping verification")
-        return None
+        print("  ⚠  No SHA256SUMS published — refusing an unverified update")
+        return False
     expected = None
     for line in sums.decode().splitlines():
         parts = line.split(None, 1)
@@ -252,8 +270,8 @@ def verify_checksum(data, asset_name, channel=None, tag=None):
             expected = parts[0].strip().lower()
             break
     if expected is None:
-        print("  ⚠  Checksum for this asset missing from SHA256SUMS — skipping verification")
-        return None
+        print("  ⚠  Checksum missing — refusing an unverified update")
+        return False
     actual = hashlib.sha256(data).hexdigest()
     if actual != expected:
         print("\n  ✗ CHECKSUM MISMATCH — download corrupted or tampered. Aborting.")
@@ -301,11 +319,13 @@ def cmd_start(args):
 
     # Persistent storage is the safe default. Ephemeral mode is an explicit
     # opt-in because startup purges can destroy a shared data directory.
-    ephemeral = bool(args.ephemeral or cfg.get("KEEP_DATA") == "0")
+    ephemeral = bool(args.ephemeral or (not args.keep_data and cfg.get("KEEP_DATA") == "0"))
     keep_data = not ephemeral
     if not os.environ.get("MONGO_URL"):
         os.environ["LIVEPASTE_EPHEMERAL"] = "1" if ephemeral else "0"
 
+    effective_data_dir = os.environ.get("LIVEPASTE_DATA_DIR") or os.path.join(os.path.expanduser("~"), ".livepaste")
+    os.environ["LIVEPASTE_DATA_DIR"] = os.path.abspath(os.path.expanduser(effective_data_dir))
     host = args.host
     port = args.port
 
@@ -332,19 +352,74 @@ def cmd_start(args):
     print()
 
     if not args.no_update_check:
-        try:
-            _auto_update_watchdog()
-        except Exception:
-            pass
-        try:
-            check_for_update(quiet=True)
-        except Exception:
-            pass
+        import threading
+        def background_update_check():
+            try:
+                _auto_update_watchdog()
+                check_for_update(quiet=True)
+            except Exception:
+                pass
+        threading.Thread(target=background_update_check, daemon=True).start()
 
     import uvicorn
     from .core import app  # direct object import — works in frozen binaries too
 
-    uvicorn.run(app, host=host, port=port, log_level="warning")
+    # Bind before recording ownership: a failed second start must not replace
+    # the running server's launch record.
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as listener:
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            listener.bind((host, port))
+        except OSError as exc:
+            raise SystemExit(f"Could not start on {host}:{port}: {exc}")
+        listener.listen(128)
+        launch = {"pid": os.getpid(), "host": host, "port": port,
+                  "data_dir": os.path.abspath(os.path.expanduser(data_dir)), "ephemeral": ephemeral,
+                  "process_started": _process_started(os.getpid()),
+                  "supervised": os.environ.get("LIVEPASTE_SUPERVISED") == "1"}
+        import secrets
+        launch["control_token"] = secrets.token_hex(24)
+        os.makedirs(os.path.dirname(PID_PATH), exist_ok=True)
+        _atomic_json(PID_PATH + ".json", launch)
+        _atomic_json(PID_PATH + f".{port}.json", launch)
+        with open(PID_PATH, "w") as f:
+            f.write(str(os.getpid()))
+        try:
+            if _is_windows():
+                # socket.fromfd (used by uvicorn's fd option) is Unix-only.
+                # Pass the socket object, and use an authenticated local stop
+                # file because Windows SIGTERM skips Python cleanup entirely.
+                import threading
+                server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="warning"))
+                finished = threading.Event()
+                def watch_stop():
+                    while not finished.wait(.2):
+                        try:
+                            with open(PID_PATH + f".{os.getpid()}.stop") as source:
+                                requested = json.load(source)
+                            if requested.get("token") == launch["control_token"]:
+                                server.should_exit = True
+                                return
+                        except (OSError, ValueError):
+                            pass
+                watcher = threading.Thread(target=watch_stop, daemon=True)
+                watcher.start()
+                try:
+                    server.run(sockets=[listener])
+                finally:
+                    finished.set()
+                    watcher.join(timeout=1)
+            else:
+                uvicorn.run(app, fd=listener.fileno(), host=host, port=port, log_level="warning")
+        finally:
+            current = _read_launch()
+            if current.get("pid") == os.getpid():
+                for path in (PID_PATH, PID_PATH + ".json", PID_PATH + f".{port}.json"):
+                    try: os.unlink(path)
+                    except FileNotFoundError: pass
+            try: os.unlink(PID_PATH + f".{os.getpid()}.stop")
+            except FileNotFoundError: pass
 
 
 def is_frozen() -> bool:
@@ -365,6 +440,8 @@ def binary_asset_name():
         return f"livepaste-macos-{arch}"
     if system == "Linux":
         return f"livepaste-linux-{arch}"
+    if system == "Windows" and arch == "x86_64":
+        return "livepaste-windows-x86_64.exe"
     return None
 
 
@@ -431,12 +508,14 @@ def _update_binary(latest, channel=None, assume_yes=False, tag=None):
             print("Update cancelled.")
             return
     print(f"  Downloading v{label} …")
+    if _is_windows():
+        return _update_windows(tag or f"v{latest}")
     try:
-        data = fetch_release_asset(asset, tag=tag)
+        data = fetch_release_asset(asset, tag=tag or f"v{latest}")
     except Exception as e:
         print(f"\n✗ Download failed: {e}")
         sys.exit(1)
-    verdict = verify_checksum(data, asset, channel, tag=tag)
+    verdict = verify_checksum(data, asset, channel, tag=tag or f"v{latest}")
     if verdict is False:
         sys.exit(1)
     backup_binary(target)
@@ -472,6 +551,8 @@ def cmd_update(args):
             sys.exit(0)
         print(f"Up to date (v{__version__}{f', channel: {channel}' if channel else ''}).")
         sys.exit(0)
+    if not latest and (not channel or channel == "stable"):
+        raise SystemExit("No published stable release is available. Your installation was not changed.")
     if latest_t and current_t and latest_t <= current_t and not args.force:
         print(f"Already on the latest version (v{__version__}).")
         return
@@ -488,7 +569,7 @@ def cmd_update(args):
         target = f"git+https://github.com/{slug}.git@v{latest}"
     print(f"Updating LivePaste from {target} ...")
     result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--upgrade", "--quiet", "--force-reinstall", "--no-deps", target]
+        [sys.executable, "-m", "pip", "install", "--upgrade", "--quiet", "--force-reinstall", target]
     )
     if result.returncode == 0:
         if latest:
@@ -578,6 +659,8 @@ def cmd_rollback(args):
     if is_frozen():
         target = os.path.realpath(sys.executable)
         # rollback to a specific tag → same path as an update, but pinning the tag
+        if _is_windows() and not getattr(args, "tag", None):
+            raise SystemExit("Choose a released Windows installer: livepaste rollback v<version>")
         if getattr(args, "tag", None):
             tag = args.tag if args.tag.startswith("v") else f"v{args.tag}"
             current = f"v{__version__}"
@@ -654,145 +737,198 @@ def cmd_rollback(args):
     return
 
 
-def _pid_is_livepaste(pid):
-    """True when `pid` is (still) a LivePaste process — guards against pid reuse."""
+def _atomic_json(path, value):
+    import tempfile
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".livepaste-state-")
     try:
-        out = subprocess.run(
-            ["ps", "-p", str(pid), "-o", "command="],
-            capture_output=True, text=True, timeout=5,
-        ).stdout.strip()
-        return "livepaste" in out or "uvicorn" in out
+        with os.fdopen(fd, "w") as out:
+            json.dump(value, out)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp): os.unlink(tmp)
+
+
+def _read_launch(port=None):
+    try:
+        with open(PID_PATH + (f".{port}.json" if port else ".json")) as source:
+            value = json.load(source)
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _process_started(pid):
+    if _is_windows():
+        import ctypes
+        from ctypes import wintypes
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+        kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel.OpenProcess(0x1000, False, int(pid))
+        if not handle: return ""
+        try:
+            exit_code = wintypes.DWORD()
+            if not kernel.GetExitCodeProcess(handle, ctypes.byref(exit_code)) or exit_code.value != 259: return ""
+            times = [wintypes.FILETIME() for _ in range(4)]
+            if not kernel.GetProcessTimes(handle, *(ctypes.byref(t) for t in times)): return ""
+            return str((times[0].dwHighDateTime << 32) | times[0].dwLowDateTime)
+        finally:
+            kernel.CloseHandle(handle)
+    try:
+        result = subprocess.run(["ps", "-p", str(pid), "-o", "stat=", "-o", "lstart="], capture_output=True, text=True, timeout=5).stdout.strip()
+        state, _, stamp = result.partition(" ")
+        return "" if state.startswith("Z") else stamp.strip()
     except Exception:
+        return ""
+
+
+def _pid_is_livepaste(pid):
+    try:
+        import shlex
+        if _is_windows():
+            command = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", f"(Get-CimInstance Win32_Process -Filter 'ProcessId = {int(pid)}').CommandLine"], capture_output=True, text=True, timeout=10).stdout.strip()
+            args = [arg.strip('"') for arg in shlex.split(command, posix=False)]
+        else:
+            command = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True, timeout=5).stdout.strip()
+            args = shlex.split(command)
+        module = args[args.index("-m") + 1] if "-m" in args else ""
+        import ntpath
+        return (module == "livepaste" and "start" in args) or (module == "uvicorn" and "livepaste.core:app" in args) or (bool(args) and any(ntpath.basename(arg).lower() in ("livepaste", "livepaste.exe") for arg in args[:2]) and "start" in args)
+    except (ValueError, IndexError, OSError):
         return False
 
 
-def cmd_restart(args):
-    """Restart the LivePaste server — applying any staged update/rollback.
-
-    Works by locating the running server via its pid file (or a port probe),
-    sending SIGTERM, waiting for the port to free, then relaunching detached
-    with the same data dir and port. Auto-applies staged updates: if a marker
-    file exists (written by update/rollback), the restart happens silently.
-    """
-    cfg = read_config()
-    pending = pop_pending_restart()
-    if pending:
-        print(f"  Applying {pending.get('action')} to v{pending.get('version')} — restarting…")
-
-    # Find the running server
-    pid = None
+def _clear_launch(launch):
+    pid = launch.get("pid")
+    for port in (None, launch.get("port")):
+        if port is None and _read_launch().get("pid") != pid: continue
+        if port is not None and _read_launch(port).get("pid") != pid: continue
+        try: os.unlink(PID_PATH + (f".{port}.json" if port is not None else ".json"))
+        except FileNotFoundError: pass
     try:
-        with open(PID_PATH) as f:
-            pid = int(f.read().strip())
-        os.kill(pid, 0)
-    except Exception:
-        pid = None
-    # An explicit --port wins over the config file (a stale config value must
-    # not send the restart to the wrong port).
-    port = int(getattr(args, "port", None) or cfg.get("PORT") or 8000)
-    # v3.5.1: never kill a recycled pid — verify it really is LivePaste
-    # (pid files go stale; the OS hands the pid to an unrelated process).
-    if pid and not _pid_is_livepaste(pid):
-        pid = None
+        with open(PID_PATH) as source: same = source.read().strip() == str(pid)
+        if same: os.unlink(PID_PATH)
+    except FileNotFoundError: pass
+    try: os.unlink(PID_PATH + f".{pid}.stop")
+    except FileNotFoundError: pass
 
-    stopped = False
-    if pid:
-        try:
-            os.kill(pid, signal.SIGTERM)
-            for _ in range(50):
-                try:
-                    os.kill(pid, 0)
-                    time.sleep(0.1)
-                except OSError:
-                    break
-            stopped = True
-        except OSError:
-            pid = None
-    if not stopped:
-        # Last resort: probe the port and free it
-        import subprocess as _sp
-        try:
-            out = _sp.run(["lsof", "-ti", f":{port}"], capture_output=True, text=True, timeout=5).stdout
-            pids = [int(p) for p in out.split() if p.isdigit()]
-            for p in pids:
-                os.kill(p, signal.SIGTERM)
-            if pids:
-                time.sleep(0.8)
-            stopped = bool(pids)
-        except Exception:
-            pass
-    if not stopped and not pending:
-        print("No running server found (nothing to restart). Start one: livepaste start")
+
+def _stop_launch(launch):
+    pid = launch.get("pid")
+    if not isinstance(pid, int) or pid <= 0 or pid == os.getpid():
+        raise RuntimeError("No verified server process to stop")
+    stamp = launch.get("process_started")
+    if not _pid_is_livepaste(pid) or (stamp and _process_started(pid) != stamp):
         return
-
-    # Relaunch detached: same interpreter/binary, same data dir, same port
-    data_dir = cfg.get("DATA_DIR") or os.environ.get("LIVEPASTE_DATA_DIR") or os.path.join(os.path.expanduser("~"), ".livepaste", "data")
-    os.makedirs(data_dir, exist_ok=True)
-    env = dict(os.environ, LIVEPASTE_DATA_DIR=data_dir)
-    if not os.environ.get("MONGO_URL") and cfg.get("KEEP_DATA") == "0":
-        env["LIVEPASTE_EPHEMERAL"] = "1"
-    exe = sys.executable
-    # v3.5.0: run from THIS checkout — `-m livepaste` with just the interpreter
-    # can resolve a DIFFERENT installed livepaste (e.g. a system-wide 2.1.1)
-    # instead of the repo code. Seeding PYTHONPATH with this repo's root (and
-    # its src/ layout if present) pins the relaunch to the same code running now.
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    py_path = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = os.pathsep.join(p for p in (repo_root, py_path) if p)
-    frozen = is_frozen()
-    if frozen:
-        cmd = [exe, "start", "--port", str(port), "--no-update-check"]
+    if _is_windows():
+        if not launch.get("control_token"):
+            raise RuntimeError("This legacy Windows process has no safe stop control; close its own terminal first")
+        _atomic_json(PID_PATH + f".{pid}.stop", {"token": launch["control_token"]})
     else:
-        # v3.5.1: launch uvicorn directly instead of `-m livepaste`.
-        # Rationale: `python -m livepaste` can resolve a *different* installed
-        # copy of the package depending on macOS launcher quirks (framework
-        # Python.app stub, system site-packages, stale dist-info) — we observed
-        # it booting v2.1.1 from a production venv while the repo held v3.4.0.
-        # `uvicorn livepaste.core:app` with cwd + PYTHONPATH pinned to this
-        # checkout is deterministic: the repo package always wins.
-        cmd = [
-            exe, "-m", "uvicorn", "livepaste.core:app",
-            "--host", "0.0.0.0",  # nosec B104 - LAN sharing is the product; overridable via --host
-            "--port", str(port),
-            "--log-level", "warning",
-        ]
-    log = open(SERVER_LOG, "ab", 0)
-    kwargs = {}
-    if os.name == "posix":
-        kwargs["start_new_session"] = True
-        kwargs["cwd"] = repo_root
-    proc = subprocess.Popen(
-        cmd,
-        stdout=log,
-        stderr=log,
-        stdin=subprocess.DEVNULL,
-        env=env,
-        **kwargs,
-    )
-    try:
-        os.makedirs(os.path.dirname(PID_PATH), exist_ok=True)
-        with open(PID_PATH, "w") as f:
-            f.write(str(proc.pid))
-    except Exception:
-        pass
-    # Wait for the new server to answer
-    for _ in range(100):
+        os.kill(pid, signal.SIGTERM)
+    for _ in range(200):
+        if not _process_started(pid) or (stamp and _process_started(pid) != stamp):
+            _clear_launch(launch)
+            return
+        time.sleep(.1)
+    raise RuntimeError("The server did not stop; no replacement was started")
+
+
+def _update_windows(tag):
+    from pathlib import Path
+    asset = "livepaste-windows-x86_64-setup.exe"
+    data = fetch_release_asset(asset, tag=tag)
+    if verify_checksum(data, asset, tag=tag) is False:
+        raise SystemExit("Installer checksum verification failed")
+    directory = Path.home() / ".livepaste" / "updates" / tag
+    directory.mkdir(parents=True, exist_ok=True)
+    installer = directory / asset
+    installer.write_bytes(data)
+    subprocess.Popen([str(installer), "/SILENT", "/NORESTART"], **_child_options())
+    print(f"Verified {tag} installer started; it will preserve your data and restart LivePaste.")
+
+
+def cmd_restart(args):
+    cfg = read_config()
+    explicit_port = getattr(args, "port", None)
+    launch = _read_launch(explicit_port)
+    port = int(getattr(args, "port", None) or launch.get("port") or os.environ.get("LIVEPASTE_PORT") or cfg.get("PORT") or 8090)
+    host = launch.get("host") or "0.0.0.0"  # nosec B104 - LAN sharing is the documented default
+    data_dir = launch.get("data_dir") or os.environ.get("LIVEPASTE_DATA_DIR") or cfg.get("DATA_DIR") or os.path.join(os.path.expanduser("~"), ".livepaste")
+    pid = launch.get("pid")
+    if not pid and not explicit_port:
         try:
-            with _safe_urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1) as resp:
-                if resp.status == 200:
-                    break
-        except Exception:
-            time.sleep(0.2)
-    print(f"✓ Server restarted on port {port} (pid {proc.pid}) — now running v{__version__}")
-    if pending:
-        print(f"  {pending.get('action')} applied: v{pending.get('version')}")
+            with open(PID_PATH) as source: pid = int(source.read().strip())
+        except (OSError, ValueError): pid = None
+    if pid and (not _pid_is_livepaste(pid) or (launch.get("process_started") and _process_started(pid) != launch["process_started"])):
+        pid = None
+    if pid == os.getpid():
+        raise SystemExit("Refusing to restart this command's own process.")
+    if pid:
+        if _is_windows() or launch.get("supervised"):
+            _stop_launch(launch)
+            if launch.get("supervised"):
+                from .desktop import wait_ready
+                wait_ready(previous_pid=pid)
+                pop_pending_restart()
+                print(f"✓ Background server restarted on port {port}")
+                return
+        else:
+            os.kill(pid, signal.SIGTERM)
+        for _ in range(50):
+            try: os.kill(pid, 0)
+            except OSError: break
+            if not _pid_is_livepaste(pid): break
+            time.sleep(0.1)
+        else:
+            raise SystemExit("The server did not stop; no new process was started.")
+    else:
+        # No ownership evidence: never terminate a process just because it uses
+        # a port. A pending update may start an otherwise stopped server.
+        if not os.path.exists(_staged_update_path()):
+            print("No verified running LivePaste server found. Start one: livepaste start")
+            return
+    os.makedirs(data_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(SERVER_LOG), exist_ok=True)
+    env = dict(os.environ, LIVEPASTE_DATA_DIR=data_dir)
+    if is_frozen():
+        # A replacement one-file process needs its own extraction directory;
+        # the old bootloader removes its directory when the server exits.
+        env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, (repo_root, env.get("PYTHONPATH"))))
+    cmd = ([sys.executable] if is_frozen() else [sys.executable, "-m", "livepaste"]) + ["start", "--host", host, "--port", str(port), "--data-dir", data_dir, "--no-update-check"]
+    cmd.append("--ephemeral" if launch.get("ephemeral", cfg.get("KEEP_DATA") == "0") else "--keep-data")
+    with open(SERVER_LOG, "ab", buffering=0) as log:
+        proc = subprocess.Popen(cmd, stdout=log, stderr=log, stdin=subprocess.DEVNULL, env=env,
+                                cwd=data_dir, **_child_options())
+    for _ in range(100):
+        if proc.poll() is not None:
+            raise SystemExit(f"The restarted server exited. See {SERVER_LOG}")
+        try:
+            address = "::1" if ":" in host else ("127.0.0.1" if host == "0.0.0.0" else host)  # nosec B104 - health probe uses loopback
+            address = f"[{address}]" if ":" in address else address
+            with _safe_urlopen(f"http://{address}:{port}/api/health", timeout=1) as response:
+                if response.status == 200:
+                    pop_pending_restart()
+                    print(f"✓ Server restarted on {host}:{port} (pid {proc.pid})")
+                    return
+        except OSError:
+            pass
+        time.sleep(0.2)
+    raise SystemExit(f"Restart did not become healthy. See {SERVER_LOG}")
 
 
 def _auto_update_watchdog():
     """Background auto-update: download + verify + stage the binary, then swap
     in if the staged file has been stable for a day. Best-effort, never blocks."""
     try:
-        if not is_frozen() or read_config().get("AUTO_UPDATE") != "1":
+        if _is_windows() or not is_frozen() or read_config().get("AUTO_UPDATE") != "1":
             return
         marker = os.path.join(os.path.expanduser("~"), ".livepaste", "last_autoupdate")
         if os.path.exists(marker):
@@ -807,8 +943,8 @@ def _auto_update_watchdog():
         asset = binary_asset_name()
         if not asset:
             return
-        data = fetch_release_asset(asset)
-        if verify_checksum(data, asset) is False:
+        data = fetch_release_asset(asset, tag=f"v{latest}")
+        if verify_checksum(data, asset, tag=f"v{latest}") is False:
             return
         target = os.path.realpath(sys.executable)
         backup_binary(target)
@@ -892,6 +1028,10 @@ def cmd_autostart(args):
 
 
 def main():
+    if _is_windows():
+        for stream in (sys.stdout, sys.stderr):
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         prog="livepaste",
         description=f"LivePaste — share text & code on your local network in real time. Made by {AUTHOR}.",
@@ -906,18 +1046,29 @@ def main():
     )
     p_start.add_argument("--host", default="0.0.0.0", help="Bind address (default 0.0.0.0 = LAN accessible)")  # nosec B104 - LAN sharing is the product
     p_start.add_argument("--data-dir", default=None, help="Where to store pastes (default ~/.livepaste)")
-    p_start.add_argument(
+    mode = p_start.add_mutually_exclusive_group()
+    mode.add_argument(
         "--keep-data",
         action="store_true",
         help="Keep pastes/images between sessions (default: persistent)",
     )
-    p_start.add_argument(
+    mode.add_argument(
         "--ephemeral",
         action="store_true",
         help="Explicitly clear local pastes on startup and graceful exit",
     )
     p_start.add_argument("--no-update-check", action="store_true", help="Skip the GitHub update check")
     p_start.set_defaults(func=cmd_start)
+
+    from . import desktop
+    p_background = sub.add_parser("background", help="Run in the background and recover after crashes")
+    p_background.add_argument("--open", action="store_true", help="Open the editor in your browser")
+    p_background.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
+    p_background.set_defaults(func=desktop.command_background)
+    p_stop = sub.add_parser("stop", help="Stop this user's LivePaste server and background monitor")
+    p_stop.set_defaults(func=desktop.command_stop)
+    p_status = sub.add_parser("status", help="Show server and background monitor status")
+    p_status.set_defaults(func=desktop.command_status)
 
     p_update = sub.add_parser("update", help="Update LivePaste from GitHub")
     p_update.add_argument("--force", action="store_true", help="Reinstall even if already up to date")
@@ -949,7 +1100,7 @@ def main():
     p_version = sub.add_parser("version", help="Show version and check for updates")
     p_version.set_defaults(func=cmd_version)
 
-    args = parser.parse_args()
+    args = parser.parse_args(["background", "--open"] if _is_windows() and len(sys.argv) == 1 else None)
     if not args.command:
         parser.print_help()
         sys.exit(0)

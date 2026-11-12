@@ -56,7 +56,7 @@ export default function HomePage() {
       // browser has recovered from a stale/failed bundle.
       editTokenStore.save(slug, res.data.editToken || "");
       toast.success("Your live edit link is ready");
-      window.location.assign(`${window.location.origin}/${encodeURIComponent(slug)}`);
+      window.location.assign(`${window.location.origin}/${encodeURIComponent(slug)}#edit=${encodeURIComponent(res.data.editToken || "")}`);
     } catch (err) {
       const msg = err?.response?.data?.detail || "Could not create the link. Please try again.";
       toast.error(msg);

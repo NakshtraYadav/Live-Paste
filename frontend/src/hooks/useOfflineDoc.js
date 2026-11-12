@@ -1,3 +1,4 @@
+import { offlineCacheKey, getDocumentEpoch } from "@/lib/documentCache";
 import { useEffect, useState } from "react";
 import * as Y from "yjs";
 import { IndexeddbPersistence } from "y-indexeddb";
@@ -20,7 +21,7 @@ export function useOfflineDoc({ slug, ydocRef, docVersion, sheetRef, enabled }) 
     if (!enabled || !slug || !ydocRef.current) return undefined;
     const doc = ydocRef.current;
     const sid = sheetRef ? sheetRef.current : "main";
-    const idb = new IndexeddbPersistence(`${slug}::${sid}`, doc);
+    const idb = new IndexeddbPersistence(offlineCacheKey(slug, sid), doc);
     setOfflineSynced(false);
     idb.on("synced", () => setOfflineSynced(true));
     return () => {
@@ -53,9 +54,9 @@ export async function hasOfflineDoc(slug, sheetId = "main") {
  * Reads the locally persisted text for `slug::sheetId` without touching the
  * network — used for the offline cold start (server unreachable, paste cached).
  */
-export async function readOfflineDoc(slug, sheetId = "main", timeoutMs = 2500) {
+export async function readOfflineDoc(slug, sheetId = "main", timeoutMs = 2500, epoch) {
   const doc = new Y.Doc();
-  const idb = new IndexeddbPersistence(`${slug}::${sheetId}`, doc);
+  const idb = new IndexeddbPersistence(offlineCacheKey(slug, sheetId, epoch), doc);
   try {
     await new Promise((resolve) => {
       const t = setTimeout(resolve, timeoutMs);
@@ -66,11 +67,21 @@ export async function readOfflineDoc(slug, sheetId = "main", timeoutMs = 2500) {
     });
     return doc.getText("content").toString();
   } finally {
-    try {
-      idb.destroy();
-    } catch {
-      /* ignore */
-    }
+    try { await idb.destroy(); } catch { /* unavailable storage */ }
+    doc.destroy();
+  }
+}
+
+export async function readOfflineState(slug, sheetId = "main", timeoutMs = 2500, epoch) {
+  const doc = new Y.Doc();
+  const persistence = new IndexeddbPersistence(offlineCacheKey(slug, sheetId, epoch), doc);
+  let timer;
+  try {
+    await Promise.race([persistence.whenSynced, new Promise(resolve => { timer = setTimeout(resolve, timeoutMs); })]);
+    return getDocumentEpoch(slug, sheetId) || Y.encodeStateVector(doc).length > 1 ? Y.encodeStateAsUpdate(doc) : null;
+  } finally {
+    clearTimeout(timer);
+    await persistence.destroy();
     doc.destroy();
   }
 }
@@ -91,4 +102,11 @@ export function useOnlineStatus() {
     };
   }, []);
   return online;
+}
+
+// Keep an upload's original document durable even if its editor unmounts.
+export function retainOfflineDoc(slug, sheetId, doc) {
+  if (typeof indexedDB === "undefined") return null;
+  try { return new IndexeddbPersistence(offlineCacheKey(slug, sheetId), doc); }
+  catch { return null; }
 }

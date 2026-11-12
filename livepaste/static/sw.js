@@ -1,91 +1,50 @@
-/* LivePaste service worker — offline-first app shell + paste cache.
- *
- * Strategy:
- *   - App shell (/, /assets/*):        cache-first, revalidate in background
- *   - GET /api/paste/*:                network-first, cached copy as fallback
- *   - other GET /api/*:                network-first, cache fallback
- *   - POST/PUT/DELETE, WebSocket:      never intercepted
- *
- * Bump CACHE_VERSION to invalidate everything.
- */
-const CACHE_VERSION = "lp-v3.18.0";
+/* Cache only the versioned app shell. Private document state lives in Yjs
+ * IndexedDB, never in a URL-only HTTP cache that bypasses password/expiry. */
+const CACHE_VERSION = "lp-v4.0.0";
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
-const DATA_CACHE = `${CACHE_VERSION}-data`;
-
-self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(SHELL_CACHE).then((cache) => cache.addAll(["/", "/manifest.webmanifest"])),
-  );
-  self.skipWaiting();
+self.addEventListener("install", event => {
+  event.waitUntil((async () => {
+    const cache = await caches.open(SHELL_CACHE);
+    await cache.addAll(["/", "/manifest.webmanifest", "/favicon.svg", "/error-guard.js", "/runner-javascript.js", "/runner-python.js"]);
+    const html = await (await cache.match("/")).text();
+    const assets = [...html.matchAll(/(?:src|href)=["']([^"']+)["']/g)]
+      .map(match => new URL(match[1], self.location.origin))
+      .filter(url => url.origin === self.location.origin && url.pathname.startsWith("/assets/"));
+    await cache.addAll(assets.map(url => url.href));
+    await self.skipWaiting();
+  })());
 });
-
-self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    (async () => {
-      const keys = await caches.keys();
-      await Promise.all(
-        keys.filter((k) => !k.startsWith(CACHE_VERSION)).map((k) => caches.delete(k)),
-      );
-      await self.clients.claim();
-    })(),
-  );
+self.addEventListener("activate", event => {
+  event.waitUntil((async () => {
+    for (const key of await caches.keys()) {
+      if (key.startsWith("lp-v") && key !== SHELL_CACHE) await caches.delete(key);
+    }
+    await self.clients.claim();
+  })());
 });
-
-async function networkFirst(request, cacheName) {
-  const cache = await caches.open(cacheName);
-  try {
-    const fresh = await fetch(request);
-    if (fresh && fresh.ok) cache.put(request, fresh.clone());
-    return fresh;
-  } catch (err) {
-    const cached = await cache.match(request);
-    if (cached) return cached;
-    throw err;
-  }
-}
-
-async function cacheFirstRevalidate(request, cacheName) {
-  const cache = await caches.open(cacheName);
-  const cached = await cache.match(request);
-  const refresh = fetch(request)
-    .then((fresh) => {
-      if (fresh && fresh.ok) cache.put(request, fresh.clone());
-      return fresh;
-    })
-    .catch(() => undefined);
-  if (cached) return cached;
-  const fresh = await refresh;
-  if (fresh) return fresh;
-  throw new Error("offline and not cached");
-}
-
-self.addEventListener("fetch", (event) => {
-  const { request } = event;
-  if (request.method !== "GET") return; // writes never intercepted
+self.addEventListener("fetch", event => {
+  const request = event.request;
   const url = new URL(request.url);
-  if (url.protocol !== "http:" && url.protocol !== "https:") return;
-
-  // App shell: root, SPA routes (no extension), built assets
-  const isAsset = url.pathname.startsWith("/assets/") || url.pathname === "/manifest.webmanifest";
-  const isSpaRoute =
-    url.pathname === "/" ||
-    (!url.pathname.startsWith("/api/") && !url.pathname.includes(".") && request.headers.get("accept")?.includes("text/html"));
-
-  if (isAsset || isSpaRoute) {
-    event.respondWith(cacheFirstRevalidate(request, SHELL_CACHE));
-    return;
+  if (request.method !== "GET" || url.origin !== self.location.origin || url.pathname.startsWith("/api/")) return;
+  if (request.mode === "navigate") {
+    event.respondWith((async () => {
+      const cache = await caches.open(SHELL_CACHE);
+      try {
+        const response = await fetch(request);
+        if (response.ok && response.headers.get("content-type")?.includes("text/html")) await cache.put("/", response.clone());
+        return response;
+      } catch {
+        return (await cache.match("/")) || new Response("The app shell is not cached yet.", { status: 503 });
+      }
+    })());
+  } else if (url.pathname.startsWith("/assets/") || ["/favicon.svg", "/error-guard.js", "/manifest.webmanifest", "/runner-javascript.js", "/runner-python.js"].includes(url.pathname)) {
+    event.respondWith((async () => {
+      const cache = await caches.open(SHELL_CACHE);
+      const cached = await cache.match(request);
+      if (cached) return cached;
+      const response = await fetch(request);
+      if (response.ok) await cache.put(request, response.clone());
+      return response;
+    })());
   }
-
-  if (url.pathname.startsWith("/api/")) {
-    event.respondWith(
-      networkFirst(request, DATA_CACHE).catch(
-        () =>
-          new Response(
-            JSON.stringify({ detail: "You are offline — showing the last cached state." }),
-            { status: 503, headers: { "Content-Type": "application/json" } },
-          ),
-      ),
-    );
-  }
-  // everything else: browser default
 });

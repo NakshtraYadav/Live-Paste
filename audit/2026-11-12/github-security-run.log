@@ -1,0 +1,486 @@
+frontend-security	UNKNOWN STEP	﻿2026-11-09T11:45:09.5661997Z Current runner version: '2.338.2'
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5685297Z ##[group]Runner Image Provisioner
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5686022Z Hosted Compute Agent
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5686484Z Version: 20261028.624
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5687100Z Commit: 54898b74c23fde5556c9b3c3a2290865feef0dfe
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5687701Z Build Date: 2026-10-28T21:51:42Z
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5688330Z Worker ID: {40b3cd52-8b37-4c27-b82d-352c22cec252}
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5688928Z Region: centralus
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5689431Z Cloud: Azure
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5690125Z ##[endgroup]
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5691329Z ##[group]Operating System
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5691882Z Ubuntu
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5692305Z 26.04.1
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5692724Z LTS
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5693207Z ##[endgroup]
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5693655Z ##[group]Runner Image
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5694408Z Image: ubuntu-26.04
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5694933Z Version: 20261101.186.1
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5696046Z Included Software: https://github.com/actions/runner-images/blob/ubuntu26/20261101.186/images/ubuntu/Ubuntu2604-Readme.md
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5697279Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu26%2F20261101.186
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5698091Z ##[endgroup]
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5698986Z ##[group]GITHUB_TOKEN Permissions
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5701009Z Contents: read
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5701509Z Metadata: read
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5701962Z ##[endgroup]
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5704100Z Secret source: Actions
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5705150Z Cache mode: write
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.5706038Z Prepare workflow directory
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.6052323Z Prepare all required actions
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.6095474Z Getting action download info
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:09.8318538Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.0361091Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.2251781Z Complete job name: frontend-security
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.2980759Z ##[group]Run actions/checkout@v4
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.2981455Z with:
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.2981834Z   repository: NakshtraYadav/Live-Paste
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.2985072Z   token: ***
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.2985430Z   ssh-strict: true
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.2985790Z   ssh-user: git
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.2986172Z   persist-credentials: true
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.2986560Z   clean: true
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.2986916Z   sparse-checkout-cone-mode: true
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.2987329Z   fetch-depth: 1
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.2987671Z   fetch-tags: false
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.2988032Z   show-progress: true
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.2988400Z   lfs: false
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.2988750Z   submodules: false
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.2989115Z   set-safe-directory: true
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.2989520Z   allow-unsafe-pr-checkout: false
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.2990152Z ##[endgroup]
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5499189Z Syncing repository: NakshtraYadav/Live-Paste
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5501097Z ##[group]Getting Git version info
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5501955Z Working directory is '/home/runner/work/Live-Paste/Live-Paste'
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5503202Z [command]/usr/bin/git version
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5616144Z git version 2.56.0
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5634799Z ##[endgroup]
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5648100Z Temporarily overriding HOME='/home/runner/work/_temp/346de4e2-ba7c-4250-b36e-9d7ae912c790' before making global git config changes
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5650124Z Adding repository directory to the temporary git global config as a safe directory
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5652487Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Live-Paste/Live-Paste
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5721988Z Deleting the contents of '/home/runner/work/Live-Paste/Live-Paste'
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5726433Z ##[group]Initializing the repository
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5731642Z [command]/usr/bin/git init /home/runner/work/Live-Paste/Live-Paste
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5813909Z hint: Using 'master' as the name for the initial branch. This default branch name
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5816018Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5817871Z hint: to use in all of your new repositories, which will suppress this warning,
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5819174Z hint: call:
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5819936Z hint:
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5820835Z hint: 	git config --global init.defaultBranch <name>
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5821886Z hint:
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5822907Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5824738Z hint: 'development'. The just-created branch can be renamed via this command:
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5826048Z hint:
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5826833Z hint: 	git branch -m <name>
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5827697Z hint:
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5828851Z hint: Disable this message with "git config set advice.defaultBranchName false"
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5830872Z Initialized empty Git repository in /home/runner/work/Live-Paste/Live-Paste/.git/
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5833950Z [command]/usr/bin/git remote add origin https://github.com/NakshtraYadav/Live-Paste
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5882335Z ##[endgroup]
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5883786Z ##[group]Disabling automatic garbage collection
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5895388Z [command]/usr/bin/git config --local gc.auto 0
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5931615Z ##[endgroup]
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5932935Z ##[group]Setting up auth
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.5937503Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:10.6019049Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.0416586Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.0450348Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.0717795Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.0751380Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.0992215Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.2648919Z ##[endgroup]
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.2650629Z ##[group]Fetching the repository
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.2658550Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +f447e2a4eacc1b141caf42173c4d0a3685573ac4:refs/remotes/origin/main
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.6932856Z From https://github.com/NakshtraYadav/Live-Paste
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.6934493Z  * [new ref]         f447e2a4eacc1b141caf42173c4d0a3685573ac4 -> origin/main
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.6937988Z ##[endgroup]
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.6938588Z ##[group]Determining the checkout info
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.6939332Z ##[endgroup]
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.6943758Z [command]/usr/bin/git sparse-checkout disable
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.6992204Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.7022401Z ##[group]Checking out the ref
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.7026868Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.7195872Z Switched to a new branch 'main'
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.7201505Z branch 'main' set up to track 'origin/main'.
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.7205282Z ##[endgroup]
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.7249840Z [command]/usr/bin/git log -1 --format=%H
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.7274648Z f447e2a4eacc1b141caf42173c4d0a3685573ac4
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.7522077Z ##[group]Run actions/setup-node@v4
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.7522407Z with:
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.7522631Z   node-version: 22
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.7522845Z   cache: yarn
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.7523080Z   cache-dependency-path: frontend/yarn.lock
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.7523374Z   always-auth: false
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.7523597Z   check-latest: false
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.7525762Z   token: ***
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.7526190Z ##[endgroup]
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.8984063Z (node:2196) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.8985200Z (Use `node --trace-deprecation ...` to show where the warning was created)
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.8985964Z Found in cache @ /opt/hostedtoolcache/node/22.23.4/x64
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:11.8986482Z ##[group]Environment details
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:12.7437662Z node: v22.23.4
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:12.7438066Z npm: 10.9.9
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:12.7438351Z yarn: 1.22.22
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:12.7440205Z ##[endgroup]
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:12.7489535Z [command]/usr/local/bin/yarn --version
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:12.8622065Z 1.22.22
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:12.9897945Z [command]/usr/local/bin/yarn cache dir
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:13.2235185Z /home/runner/.cache/yarn/v6
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:13.5745594Z [command]/usr/local/bin/yarn config get enableGlobalCache
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:13.7003264Z undefined
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:13.9860286Z yarn cache is not found
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:14.0073025Z ##[group]Run yarn install --frozen-lockfile
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:14.0073369Z ^[[36;1myarn install --frozen-lockfile^[[0m
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:14.0127737Z shell: /usr/bin/bash -e {0}
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:14.0127994Z ##[endgroup]
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:14.1382975Z yarn install v1.22.22
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:14.1795042Z [1/4] Resolving packages...
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:14.2031790Z warning Resolution field "underscore@1.13.8" is incompatible with requested version "underscore@1.13.6"
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:14.2151904Z warning Resolution field "uuid@11.1.1" is incompatible with requested version "uuid@^8.3.2"
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:14.2200107Z warning Resolution field "qs@6.15.2" is incompatible with requested version "qs@~6.16.0"
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:14.4586562Z warning Resolution field "@eslint/plugin-kit@0.3.4" is incompatible with requested version "@eslint/plugin-kit@^0.2.7"
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:14.4595340Z warning Resolution field "js-yaml@4.3.0" is incompatible with requested version "js-yaml@^4.3.2"
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:14.4926951Z warning Resolution field "form-data@3.0.5" is incompatible with requested version "form-data@^4.0.0"
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:14.5455752Z [2/4] Fetching packages...
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:27.9630843Z [3/4] Linking dependencies...
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:27.9644836Z warning " > @babel/plugin-transform-modules-systemjs@7.29.4" has unmet peer dependency "@babel/core@^7.0.0-0".
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:27.9645702Z warning "@babel/plugin-transform-modules-systemjs > @babel/helper-module-transforms@7.29.7" has unmet peer dependency "@babel/core@^7.0.0".
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:27.9734539Z warning " > react-day-picker@8.10.1" has incorrect peer dependency "date-fns@^2.28.0 || ^3.0.0".
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:27.9736025Z warning " > react-day-picker@8.10.1" has incorrect peer dependency "react@^16.8.0 || ^17.0.0 || ^18.0.0".
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:27.9738860Z warning " > recharts@3.6.0" has unmet peer dependency "react-is@^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0".
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:27.9747143Z warning " > @babel/plugin-proposal-private-property-in-object@7.21.11" has unmet peer dependency "@babel/core@^7.0.0-0".
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:27.9748987Z warning "@babel/plugin-proposal-private-property-in-object > @babel/helper-create-class-features-plugin@7.29.7" has unmet peer dependency "@babel/core@^7.0.0".
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:27.9750888Z warning "@babel/plugin-proposal-private-property-in-object > @babel/plugin-syntax-private-property-in-object@7.14.5" has unmet peer dependency "@babel/core@^7.0.0-0".
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:27.9755964Z warning "@babel/plugin-proposal-private-property-in-object > @babel/helper-create-class-features-plugin > @babel/helper-replace-supers@7.29.7" has unmet peer dependency "@babel/core@^7.0.0".
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:27.9856823Z warning Workspaces can only be enabled in private projects.
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:27.9902688Z warning Workspaces can only be enabled in private projects.
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:39.9425098Z [4/4] Building fresh packages...
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.0355450Z Done in 25.90s.
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.1341919Z ##[group]Run yarn audit --groups dependencies
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.1342397Z ^[[36;1myarn audit --groups dependencies^[[0m
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.1387900Z shell: /usr/bin/bash -e {0}
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.1388139Z ##[endgroup]
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.2586926Z yarn audit v1.22.22
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.3179844Z warning Resolution field "underscore@1.13.8" is incompatible with requested version "underscore@1.13.6"
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.3291063Z warning Resolution field "uuid@11.1.1" is incompatible with requested version "uuid@^8.3.2"
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.3338290Z warning Resolution field "qs@6.15.2" is incompatible with requested version "qs@~6.16.0"
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.3905319Z warning Resolution field "@eslint/plugin-kit@0.3.4" is incompatible with requested version "@eslint/plugin-kit@^0.2.7"
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.3930977Z warning Resolution field "js-yaml@4.3.0" is incompatible with requested version "js-yaml@^4.3.2"
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.4266167Z warning Resolution field "form-data@3.0.5" is incompatible with requested version "form-data@^4.0.0"
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7911100Z ┌───────────────┬──────────────────────────────────────────────────────────────┐
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7912107Z │ moderate      │ Axios: Prototype pollution gadget in fetch adapter can alter │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7912904Z │               │ outbound requests                                            │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7913651Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7914605Z │ Package       │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7915372Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7916071Z │ Patched in    │ >=1.20.0                                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7916759Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7917507Z │ Dependency of │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7918264Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7918961Z │ Path          │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7919789Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7920555Z │ More info     │ https://www.npmjs.com/advisories/1240600                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7921338Z └───────────────┴──────────────────────────────────────────────────────────────┘
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7943312Z ┌───────────────┬──────────────────────────────────────────────────────────────┐
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7944461Z │ moderate      │ Axios: Prototype-Pollution Gadget in the Default Instance    │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7945454Z │               │ Allows Inherited Object.prototype.method to Override HTTP    │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7946257Z │               │ Method                                                       │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7947621Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7948624Z │ Package       │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7949416Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7950147Z │ Patched in    │ >=1.20.0                                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7950965Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7951808Z │ Dependency of │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7952629Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7953342Z │ Path          │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7954112Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7955102Z │ More info     │ https://www.npmjs.com/advisories/1240601                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7956022Z └───────────────┴──────────────────────────────────────────────────────────────┘
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7956857Z ┌───────────────┬──────────────────────────────────────────────────────────────┐
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7957689Z │ high          │ Axios: ReDoS in fromDataURI data: URL parser freezes the     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7958543Z │               │ Node event loop (DoS)                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7959473Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7960265Z │ Package       │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7961070Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7961813Z │ Patched in    │ >=1.20.0                                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7962631Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7963381Z │ Dependency of │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7964561Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7966122Z │ Path          │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7966864Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7967632Z │ More info     │ https://www.npmjs.com/advisories/1240603                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7968411Z └───────────────┴──────────────────────────────────────────────────────────────┘
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7969066Z ┌───────────────┬──────────────────────────────────────────────────────────────┐
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7969818Z │ high          │ Axios: ReDoS (O(N²)) in shouldBypassProxy host               │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7970591Z │               │ normalization, reachable via untrusted redirect Location     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7971776Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7972675Z │ Package       │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7973407Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7974095Z │ Patched in    │ >=1.20.0                                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7974916Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7975651Z │ Dependency of │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7976352Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7976953Z │ Path          │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7977678Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7978453Z │ More info     │ https://www.npmjs.com/advisories/1240604                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7979255Z └───────────────┴──────────────────────────────────────────────────────────────┘
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7979986Z ┌───────────────┬──────────────────────────────────────────────────────────────┐
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7980720Z │ high          │ Axios: Prototype Pollution Gadget in axios toFormData        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7981438Z │               │ Options                                                      │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7982138Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7982827Z │ Package       │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7983576Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7984423Z │ Patched in    │ >=1.20.0                                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7985663Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7988180Z │ Dependency of │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7989662Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7990435Z │ Path          │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7991182Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7991962Z │ More info     │ https://www.npmjs.com/advisories/1240605                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7992780Z └───────────────┴──────────────────────────────────────────────────────────────┘
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.7993476Z ┌───────────────┬──────────────────────────────────────────────────────────────┐
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8004538Z │ high          │ Axios: HTTP/2 adapter bypasses configured DNS lookup and     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8005487Z │               │ proxy controls                                               │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8006292Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8007024Z │ Package       │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8007758Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8008457Z │ Patched in    │ >=1.20.0                                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8009186Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8009890Z │ Dependency of │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8010714Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8011390Z │ Path          │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8012066Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8012811Z │ More info     │ https://www.npmjs.com/advisories/1240607                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8013626Z └───────────────┴──────────────────────────────────────────────────────────────┘
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8014509Z ┌───────────────┬──────────────────────────────────────────────────────────────┐
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8015262Z │ high          │ Axios: Denial of Service via Unhandled 'error' Event in      │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8016056Z │               │ HTTP/2 ClientHttp2Session Initialization                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8016838Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8017516Z │ Package       │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8018259Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8018949Z │ Patched in    │ >=1.20.0                                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8019706Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8020411Z │ Dependency of │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8021201Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8021877Z │ Path          │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8022597Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8023338Z │ More info     │ https://www.npmjs.com/advisories/1240608                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8024102Z └───────────────┴──────────────────────────────────────────────────────────────┘
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8024847Z ┌───────────────┬──────────────────────────────────────────────────────────────┐
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8025300Z │ moderate      │ Axios: Header Injection via Inherited headers After Minimal  │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8025955Z │               │ Interceptor                                                  │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8026399Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8026926Z │ Package       │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8027372Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8027786Z │ Patched in    │ >=1.20.0                                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8028208Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8028616Z │ Dependency of │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8029044Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8029430Z │ Path          │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8029849Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8030307Z │ More info     │ https://www.npmjs.com/advisories/1240626                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8030783Z └───────────────┴──────────────────────────────────────────────────────────────┘
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8031204Z ┌───────────────┬──────────────────────────────────────────────────────────────┐
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8031644Z │ moderate      │ Axios: Fetch Adapter Header Injection via Inherited FormData │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8032096Z │               │ getHeaders                                                   │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8032529Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8032947Z │ Package       │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8033393Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8033789Z │ Patched in    │ >=1.20.0                                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8034411Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8034836Z │ Dependency of │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8035294Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8035683Z │ Path          │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8036103Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8036532Z │ More info     │ https://www.npmjs.com/advisories/1240627                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8036990Z └───────────────┴──────────────────────────────────────────────────────────────┘
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8037422Z ┌───────────────┬──────────────────────────────────────────────────────────────┐
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8037847Z │ high          │ Axios: Node HTTP adapter prototype-pollution gadget allows   │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8038431Z │               │ request socket hijack via inherited createConnection         │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8038883Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8039399Z │ Package       │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8039840Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8040231Z │ Patched in    │ >=1.20.0                                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8040651Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8041048Z │ Dependency of │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8041486Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8041886Z │ Path          │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8042303Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8042741Z │ More info     │ https://www.npmjs.com/advisories/1240628                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8043212Z └───────────────┴──────────────────────────────────────────────────────────────┘
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8043627Z ┌───────────────┬──────────────────────────────────────────────────────────────┐
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8044065Z │ moderate      │ Axios: CIDR-form NO_PROXY entries are ignored, causing proxy │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8044625Z │               │ exclusion bypass for internal IP ranges                      │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8045085Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8045493Z │ Package       │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8045917Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8046321Z │ Patched in    │ >=1.20.0                                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8046883Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8047323Z │ Dependency of │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8047941Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8048330Z │ Path          │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8048753Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8049190Z │ More info     │ https://www.npmjs.com/advisories/1240629                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8049641Z └───────────────┴──────────────────────────────────────────────────────────────┘
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8050057Z ┌───────────────┬──────────────────────────────────────────────────────────────┐
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8050527Z │ high          │ Axios: maxRedirects: 0 is not enforced by the fetch adapter, │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8051031Z │               │ allowing redirect-based SSRF                                 │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8051477Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8051892Z │ Package       │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8052320Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8052708Z │ Patched in    │ >=1.20.0                                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8053161Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8053593Z │ Dependency of │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8054060Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8054543Z │ Path          │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8054994Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8055595Z │ More info     │ https://www.npmjs.com/advisories/1240634                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8056224Z └───────────────┴──────────────────────────────────────────────────────────────┘
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8056684Z ┌───────────────┬──────────────────────────────────────────────────────────────┐
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8057133Z │ high          │ Zod can exhaust memory while validating oversized            │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8057613Z │               │ constrained collections                                      │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8058090Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8058532Z │ Package       │ zod                                                          │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8058991Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8059418Z │ Patched in    │ >=4.6.6                                                      │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8059895Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8060334Z │ Dependency of │ zod                                                          │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8060802Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8061218Z │ Path          │ zod                                                          │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8061671Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8062139Z │ More info     │ https://www.npmjs.com/advisories/1243066                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8062632Z └───────────────┴──────────────────────────────────────────────────────────────┘
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8063096Z ┌───────────────┬──────────────────────────────────────────────────────────────┐
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8063561Z │ low           │ DOMPurify: IN_PLACE: node-removing afterSanitize hook leaves │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8064083Z │               │ detached subtree event handlers armed, causing DOM XSS       │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8064769Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8065235Z │ Package       │ dompurify                                                    │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8065708Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8066161Z │ Patched in    │ >=3.4.16                                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8066614Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8067085Z │ Dependency of │ dompurify                                                    │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8067564Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8068063Z │ Path          │ dompurify                                                    │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8068547Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8069167Z │ More info     │ https://www.npmjs.com/advisories/1240621                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8069775Z └───────────────┴──────────────────────────────────────────────────────────────┘
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8070249Z ┌───────────────┬──────────────────────────────────────────────────────────────┐
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8070724Z │ low           │ DOMPurify: IN_PLACE returns a force-removed rawtext root     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8071231Z │               │ whose text carries attacker markup — pure HTML reparse       │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8071679Z │               │ executes                                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8072146Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8072632Z │ Package       │ dompurify                                                    │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8073088Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8073568Z │ Patched in    │ >=3.4.16                                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8074058Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8074711Z │ Dependency of │ dompurify                                                    │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8075200Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8075664Z │ Path          │ dompurify                                                    │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8076141Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8076617Z │ More info     │ https://www.npmjs.com/advisories/1241204                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8077116Z └───────────────┴──────────────────────────────────────────────────────────────┘
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8077574Z ┌───────────────┬──────────────────────────────────────────────────────────────┐
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8078182Z │ critical      │ DOMPurify SAFE_FOR_TEMPLATES bypass: split template          │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8078710Z │               │ expressions survive in attached shadow root content on DOM   │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8079258Z │               │ output modes                                                 │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8079686Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8080103Z │ Package       │ dompurify                                                    │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8080542Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8080937Z │ Patched in    │ >=3.4.17                                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8081352Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8081766Z │ Dependency of │ dompurify                                                    │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8082255Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8082656Z │ Path          │ dompurify                                                    │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8083100Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8083520Z │ More info     │ https://www.npmjs.com/advisories/1242880                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8083961Z └───────────────┴──────────────────────────────────────────────────────────────┘
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8084547Z ┌───────────────┬──────────────────────────────────────────────────────────────┐
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8084981Z │ high          │ DOMPurify IN_PLACE: hook that removes a parent or sibling    │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8085485Z │               │ leaves the detached subtree's event handlers armed           │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8085982Z │               │ (incomplete fix for GHSA-p98j-92pf-mc4p)                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8086487Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8087097Z │ Package       │ dompurify                                                    │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8087740Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8088186Z │ Patched in    │ >=3.4.17                                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8088686Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8089155Z │ Dependency of │ dompurify                                                    │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8089635Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8090068Z │ Path          │ dompurify                                                    │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8090531Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8091022Z │ More info     │ https://www.npmjs.com/advisories/1242881                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8091536Z └───────────────┴──────────────────────────────────────────────────────────────┘
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8091993Z ┌───────────────┬──────────────────────────────────────────────────────────────┐
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8092500Z │ low           │ DOMPurify: SMIL attributeName=href guard is skipped when     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8093076Z │               │ PARSER_MEDIA_TYPE is application/xhtml+xml                   │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8093639Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8094240Z │ Package       │ dompurify                                                    │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8094780Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8095244Z │ Patched in    │ >=3.4.17                                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8095706Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8096194Z │ Dependency of │ dompurify                                                    │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8096690Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8097291Z │ Path          │ dompurify                                                    │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8097758Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8098233Z │ More info     │ https://www.npmjs.com/advisories/1242882                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8098720Z └───────────────┴──────────────────────────────────────────────────────────────┘
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8099178Z ┌───────────────┬──────────────────────────────────────────────────────────────┐
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8099680Z │ high          │ follow-redirects array-form headers bypass cross-origin      │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8100171Z │               │ credential stripping                                         │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8100695Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8101373Z │ Package       │ follow-redirects                                             │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8101961Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8102464Z │ Patched in    │ >=1.16.1                                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8102996Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8103487Z │ Dependency of │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8103962Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8104578Z │ Path          │ axios > follow-redirects                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8105065Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8105496Z │ More info     │ https://www.npmjs.com/advisories/1242604                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8106185Z └───────────────┴──────────────────────────────────────────────────────────────┘
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8106871Z ┌───────────────┬──────────────────────────────────────────────────────────────┐
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8107474Z │ high          │ follow-redirects sensitiveHeaders regex escaping can expose  │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8107931Z │               │ credential headers                                           │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8108365Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8108786Z │ Package       │ follow-redirects                                             │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8109228Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8109632Z │ Patched in    │ >=1.16.1                                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8110100Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8111669Z │ Dependency of │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8113120Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8113711Z │ Path          │ axios > follow-redirects                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8114363Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8114845Z │ More info     │ https://www.npmjs.com/advisories/1242605                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8115319Z └───────────────┴──────────────────────────────────────────────────────────────┘
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8115736Z ┌───────────────┬──────────────────────────────────────────────────────────────┐
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8116204Z │ high          │ follow-redirects: Cross-realm sensitiveHeaders arrays are    │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8116682Z │               │ discarded and custom credentials can follow redirects        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8117137Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8117590Z │ Package       │ follow-redirects                                             │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8118060Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8118462Z │ Patched in    │ >=1.16.2                                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8118887Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8119304Z │ Dependency of │ axios                                                        │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8119746Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8120386Z │ Path          │ axios > follow-redirects                                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8121001Z ├───────────────┼──────────────────────────────────────────────────────────────┤
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8121497Z │ More info     │ https://www.npmjs.com/advisories/1244003                     │
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8122367Z └───────────────┴──────────────────────────────────────────────────────────────┘
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8123052Z 21 vulnerabilities found - Packages audited: 232
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8123529Z Severity: 3 Low | 5 Moderate | 12 High | 1 Critical
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8123892Z Done in 0.55s.
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8170995Z ##[error]Process completed with exit code 30.
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.8293641Z Post job cleanup.
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.9006626Z [command]/usr/bin/git version
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.9045613Z git version 2.56.0
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.9077314Z Temporarily overriding HOME='/home/runner/work/_temp/d32478e6-168e-4446-8d09-4235f5ff026c' before making global git config changes
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.9078400Z Adding repository directory to the temporary git global config as a safe directory
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.9082051Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Live-Paste/Live-Paste
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.9120143Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.9152649Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.9422485Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.9447775Z http.https://github.com/.extraheader
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.9457121Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.9496346Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.9772605Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:40.9804598Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:41.0175643Z Cleaning up orphan processes
+frontend-security	UNKNOWN STEP	2026-11-09T11:45:41.0510877Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

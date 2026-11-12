@@ -1,11 +1,15 @@
-fastapi==0.110.1
-uvicorn==0.25.0
-starlette==0.37.2
-motor==3.3.1
-pymongo==4.6.3
-pydantic==2.13.4
-python-dotenv==1.2.2
-python-multipart==0.0.32
-websockets==16.1.1
-dnspython==2.8.0
-aiosqlite==0.20.0
+# Hosted entrypoint; keep runtime dependencies aligned with pyproject.toml.
+fastapi>=0.162.5,<0.163
+starlette>=1.10,<2
+anyio>=4.14.2,<5
+uvicorn>=0.54,<0.55
+pydantic>=2.13.5,<3
+python-multipart>=0.0.33,<0.1
+websockets>=17.4,<18
+aiosqlite>=0.20
+redis>=5.0
+pycrdt>=0.14.13,<0.15
+motor>=3.7,<4
+pymongo>=4.9,<5
+dnspython>=2.6.1
+python-dotenv>=1.2.2

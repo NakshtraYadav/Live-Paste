@@ -82,6 +82,7 @@ export default function usePresence({
         return;
       }
       if (msg.type === "peers" && Array.isArray(msg.p)) {
+        peersRef.current.clear();
         for (const p of msg.p) {
           if (p && p.clientId && p.clientId !== me.clientId) {
             peersRef.current.set(p.clientId, p);

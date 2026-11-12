@@ -1,16 +1,21 @@
 """LivePaste — share text & code on your local network in real time."""
 
 from pathlib import Path
+import sys
 
 
 def _detect_version() -> str:
-    # Standalone binary: version baked in at build time by the CI workflow
-    try:
-        from ._version import __version__ as v
-
-        return v
-    except ImportError:
-        pass
+    # A baked version is authoritative only inside a frozen executable.
+    if getattr(sys, "frozen", False):
+        try:
+            from ._version import __version__ as v
+            return v
+        except ImportError:
+            pass
+    # A checkout's VERSION belongs to this source, unlike unrelated installed metadata.
+    root = Path(__file__).parent.parent
+    if (root / "pyproject.toml").is_file() and (root / "VERSION").is_file():
+        return (root / "VERSION").read_text().strip()
     # Installed package: read from package metadata
     try:
         from importlib.metadata import version

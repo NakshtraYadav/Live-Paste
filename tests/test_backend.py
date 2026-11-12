@@ -11,6 +11,7 @@ import os
 import tempfile
 
 import pytest
+from pycrdt import Doc, Text
 
 # Isolated data dir BEFORE importing the app
 _TMP = tempfile.mkdtemp(prefix="lp-test-")
@@ -199,7 +200,7 @@ def test_ws_editor_accepted(client):
 def test_yupdate_relay_and_state(client):
     p = _create(client, content="")
     slug, token = p["slug"], p["editToken"]
-    upd = base64.b64encode(b"fake-yjs-update-bytes").decode()
+    upd = base64.b64encode(Doc({"content": Text("main CRDT text")}).get_update()).decode()
 
     with client.websocket_connect(f"/api/ws/{slug}?token={token}") as a, \
          client.websocket_connect(f"/api/ws/{slug}?token={token}") as b:
@@ -215,7 +216,7 @@ def test_yupdate_relay_and_state(client):
     import asyncio
     from livepaste import core as _core
 
-    stored = asyncio.get_event_loop().run_until_complete(_core.storage.get_yupdates(slug))
+    stored = client.portal.call(_core.storage.get_yupdates, slug)
     assert base64.b64encode(stored[-1]).decode() == upd
 
     # New joiner receives the accumulated state in init
@@ -455,7 +456,7 @@ def test_sheet_ws_relay_and_state(client):
     sid = client.post(
         f"/api/paste/{slug}/sheets", json={"editToken": token, "name": "P2"}
     ).json()["sheetId"]
-    upd = base64.b64encode(b"sheet-y-update").decode()
+    upd = base64.b64encode(Doc({"content": Text("sheet CRDT text")}).get_update()).decode()
 
     with client.websocket_connect(f"/api/ws/{slug}?token={token}") as a, \
          client.websocket_connect(f"/api/ws/{slug}?token={token}") as b:

@@ -1,0 +1,134 @@
+FFFFFFFFFFFFF.                                                           [100%]
+=================================== FAILURES ===================================
+______________ test_granted_identity_does_not_disclose_capability ______________
+audit/2026-11-12/test_reproductions.py:60: in test_granted_identity_does_not_disclose_capability
+    assert until(attacker, "init")["canEdit"] is False
+E   assert True is False
+___________________ test_viewer_can_request_sheet_sync_state ___________________
+audit/2026-11-12/test_reproductions.py:70: in test_viewer_can_request_sheet_sync_state
+    assert viewer.receive_json()["type"] == "s:state"
+E   AssertionError: assert 'error' == 's:state'
+E
+E     - s:state
+E     + error
+_________________ test_full_text_backup_preserves_crdt_history _________________
+audit/2026-11-12/test_reproductions.py:82: in test_full_text_backup_preserves_crdt_history
+    assert client.portal.call(core.storage.get_yupdates, p["slug"])
+E   AssertionError: assert []
+E    +  where [] = call(get_yupdates, 'MfjX2ay')
+E    +    where call = <anyio.from_thread.BlockingPortal object at 0x10932a8e0>.call
+E    +      where <anyio.from_thread.BlockingPortal object at 0x10932a8e0> = <starlette.testclient.TestClient object at 0x10923fb50>.portal
+E    +    and   get_yupdates = <livepaste.storage.SQLiteStorage object at 0x109347460>.get_yupdates
+E    +      where <livepaste.storage.SQLiteStorage object at 0x109347460> = core.storage
+____________________ test_rest_password_guesses_are_limited ____________________
+audit/2026-11-12/test_reproductions.py:89: in test_rest_password_guesses_are_limited
+    assert 429 in statuses, statuses
+E   AssertionError: [401, 401, 401, 401, 401, 401, ...]
+E   assert 429 in [401, 401, 401, 401, 401, 401, ...]
+________________________ test_long_password_round_trips ________________________
+audit/2026-11-12/test_reproductions.py:96: in test_long_password_round_trips
+    assert client.get(f"/api/paste/{p['slug']}", headers={"X-View-Password": password}).status_code == 200
+E   AssertionError: assert 401 == 200
+E    +  where 401 = <Response [401 Unauthorized]>.status_code
+E    +    where <Response [401 Unauthorized]> = get('/api/paste/vP1ni7o', headers={'X-View-Password': 'ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp'})
+E    +      where get = <starlette.testclient.TestClient object at 0x109333af0>.get
+_____________________ test_locked_paste_hides_sheet_names ______________________
+audit/2026-11-12/test_reproductions.py:104: in test_locked_paste_hides_sheet_names
+    assert client.get(f"/api/paste/{p['slug']}/sheets").status_code == 401
+E   AssertionError: assert 200 == 401
+E    +  where 200 = <Response [200 OK]>.status_code
+E    +    where <Response [200 OK]> = get('/api/paste/oI08AuF/sheets')
+E    +      where get = <starlette.testclient.TestClient object at 0x1093303d0>.get
+_______________________ test_burn_counts_anonymous_reads _______________________
+audit/2026-11-12/test_reproductions.py:112: in test_burn_counts_anonymous_reads
+    assert client.get(url).status_code == 404
+E   AssertionError: assert 200 == 404
+E    +  where 200 = <Response [200 OK]>.status_code
+E    +    where <Response [200 OK]> = get('/api/paste/Dp0zACz?count_view=true')
+E    +      where get = <starlette.testclient.TestClient object at 0x1092da160>.get
+________________________ test_purge_all_clears_history _________________________
+audit/2026-11-12/test_reproductions.py:126: in test_purge_all_clears_history
+    assert remaining == {"updates": [], "revisions": []}
+E   AssertionError: assert {'revisions':...vate update']} == {'revisions':...'updates': []}
+E
+E     Differing items:
+E     {'revisions': [{'content': 'private revision', 'created_at': '2026-11-12T04:33:37.295223+00:00', 'rev': 1}]} != {'revisions': []}
+E     {'updates': [b'private update']} != {'updates': []}
+E     Use -v to get more diff
+___________________ test_expired_socket_cannot_write_updates ___________________
+audit/2026-11-12/test_reproductions.py:144: in test_expired_socket_cannot_write_updates
+    assert not client.portal.call(core.storage.get_yupdates, p["slug"])
+E   AssertionError: assert not [b'abc']
+E    +  where [b'abc'] = call(get_yupdates, 'lQtefpT')
+E    +    where call = <anyio.from_thread.BlockingPortal object at 0x1081ae6a0>.call
+E    +      where <anyio.from_thread.BlockingPortal object at 0x1081ae6a0> = <starlette.testclient.TestClient object at 0x10934a130>.portal
+E    +    and   get_yupdates = <livepaste.storage.SQLiteStorage object at 0x109330190>.get_yupdates
+E    +      where <livepaste.storage.SQLiteStorage object at 0x109330190> = core.storage
+_____________________ test_restart_uses_start_default_port _____________________
+audit/2026-11-12/test_reproductions.py:171: in test_restart_uses_start_default_port
+    assert cmd[cmd.index("--port") + 1] == "8090"
+E   AssertionError: assert '8000' == '8090'
+E
+E     - 8090
+E     ?   -
+E     + 8000
+E     ?    +
+----------------------------- Captured stdout call -----------------------------
+  Applying None to v3.18.0 — restarting…
+✓ Server restarted on port 8000 (pid 987654) — now running v3.18.0
+  None applied: v3.18.0
+___________________ test_restart_uses_start_default_data_dir ___________________
+audit/2026-11-12/test_reproductions.py:177: in test_restart_uses_start_default_data_dir
+    assert popen.call_args.kwargs["env"]["LIVEPASTE_DATA_DIR"] == str(tmp_path / ".livepaste")
+E   AssertionError: assert '/private/var...ivepaste/data' == '/private/var...l1/.livepaste'
+E
+E     Skipping 121 identical leading characters in diff, use -v to show
+E     - /.livepaste
+E     + /.livepaste/data
+E     ?            +++++
+----------------------------- Captured stdout call -----------------------------
+  Applying None to v3.18.0 — restarting…
+✓ Server restarted on port 8000 (pid 987654) — now running v3.18.0
+  None applied: v3.18.0
+_______________ test_restart_never_kills_an_unrelated_port_user ________________
+audit/2026-11-12/test_reproductions.py:184: in test_restart_never_kills_an_unrelated_port_user
+    kill.assert_not_called()
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:868: in assert_not_called
+    raise AssertionError(msg)
+E   AssertionError: Expected 'mock' to not have been called. Called 1 times.
+E   Calls: [call(87654, <Signals.SIGTERM: 15>)].
+----------------------------- Captured stdout call -----------------------------
+✓ Server restarted on port 8000 (pid 987654) — now running v3.18.0
+_______________ test_explicit_keep_data_overrides_legacy_config ________________
+audit/2026-11-12/test_reproductions.py:196: in test_explicit_keep_data_overrides_legacy_config
+    assert os.environ["LIVEPASTE_EPHEMERAL"] == "0"
+E   AssertionError: assert '1' == '0'
+E
+E     - 0
+E     + 1
+----------------------------- Captured stdout call -----------------------------
+
+  ╭────────────────────────────────────────────────────╮
+  │  ⚡ LivePaste v3.18.0  made by Nakshtra Yadav
+  ├────────────────────────────────────────────────────┤
+  │  Local:    http://localhost:18191
+  │  Data:     /var/folders/kj/nzl_s2tn0q54cxw7dd2fdrp80000gn/T/lp-bug-audit-ywa24bc2
+  │  Session:  EPHEMERAL — clears on exit/start (explicit opt-in)
+  ╰────────────────────────────────────────────────────╯
+  Press Ctrl+C to stop.
+
+=========================== short test summary info ============================
+FAILED audit/2026-11-12/test_reproductions.py::test_granted_identity_does_not_disclose_capability
+FAILED audit/2026-11-12/test_reproductions.py::test_viewer_can_request_sheet_sync_state
+FAILED audit/2026-11-12/test_reproductions.py::test_full_text_backup_preserves_crdt_history
+FAILED audit/2026-11-12/test_reproductions.py::test_rest_password_guesses_are_limited
+FAILED audit/2026-11-12/test_reproductions.py::test_long_password_round_trips
+FAILED audit/2026-11-12/test_reproductions.py::test_locked_paste_hides_sheet_names
+FAILED audit/2026-11-12/test_reproductions.py::test_burn_counts_anonymous_reads
+FAILED audit/2026-11-12/test_reproductions.py::test_purge_all_clears_history
+FAILED audit/2026-11-12/test_reproductions.py::test_expired_socket_cannot_write_updates
+FAILED audit/2026-11-12/test_reproductions.py::test_restart_uses_start_default_port
+FAILED audit/2026-11-12/test_reproductions.py::test_restart_uses_start_default_data_dir
+FAILED audit/2026-11-12/test_reproductions.py::test_restart_never_kills_an_unrelated_port_user
+FAILED audit/2026-11-12/test_reproductions.py::test_explicit_keep_data_overrides_legacy_config
+13 failed, 1 passed in 4.82s

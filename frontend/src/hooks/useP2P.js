@@ -17,7 +17,7 @@ import { WebrtcProvider } from "y-webrtc";
  * `docVersion` must bump whenever the Y.Doc instance is swapped (paste load /
  * sheet switch) so a new provider is created for the right doc.
  */
-export default function useP2P({ slug, ydocRef, docVersion = 0, sheetId = "main", enabled }) {
+export default function useP2P({ slug, ydocRef, docVersion = 0, sheetId = "main", enabled, password }) {
   const providerRef = useRef(null);
   const [p2pPeers, setP2pPeers] = useState(0);
   const [p2pStatus, setP2pStatus] = useState("off"); // off | connecting | connected
@@ -25,6 +25,11 @@ export default function useP2P({ slug, ydocRef, docVersion = 0, sheetId = "main"
   useEffect(() => {
     if (!enabled || !slug || !ydocRef.current) {
       setP2pStatus("off");
+      setP2pPeers(0);
+      return undefined;
+    }
+    if (password && !window.crypto?.subtle) {
+      setP2pStatus("HTTPS required");
       setP2pPeers(0);
       return undefined;
     }
@@ -43,6 +48,8 @@ export default function useP2P({ slug, ydocRef, docVersion = 0, sheetId = "main"
         `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/api/webrtc/signaling`,
       ],
       maxConns: 12,
+      password,
+      filterBcConns: false,
     });
     providerRef.current = provider;
     setP2pStatus("connecting");
@@ -50,10 +57,9 @@ export default function useP2P({ slug, ydocRef, docVersion = 0, sheetId = "main"
 
     const onPeers = ({ webrtcPeers }) => {
       setP2pPeers(webrtcPeers ? webrtcPeers.length : 0);
-      if (webrtcPeers && webrtcPeers.length > 0) setP2pStatus("connected");
+      setP2pStatus(webrtcPeers?.length ? "connected" : "connecting");
     };
     provider.on("peers", onPeers);
-    provider.on("synced", () => setP2pStatus("connected"));
 
     return () => {
       try {
@@ -65,7 +71,7 @@ export default function useP2P({ slug, ydocRef, docVersion = 0, sheetId = "main"
       setP2pStatus("off");
       setP2pPeers(0);
     };
-  }, [slug, sheetId, ydocRef, docVersion, enabled]);
+  }, [slug, sheetId, ydocRef, docVersion, enabled, password]);
 
   return { p2pPeers, p2pStatus };
 }

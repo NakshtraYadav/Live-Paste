@@ -1,0 +1,16 @@
+{
+  "expectedLength": 1005,
+  "fullHistoryReplayLength": 1005,
+  "main": {
+    "storedUpdates": 503,
+    "replayLength": 0
+  },
+  "sheet": {
+    "storedUpdates": 503,
+    "replayLength": 0
+  },
+  "afterFullTextHistoryDeletion": {
+    "retainedUpdates": 1004,
+    "replayLength": 0
+  }
+}

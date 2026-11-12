@@ -1,0 +1,52 @@
+[main]	INFO	profile include tests: None
+[main]	INFO	profile exclude tests: None
+[main]	INFO	cli include tests: None
+[main]	INFO	cli exclude tests: None
+[main]	INFO	running on Python 3.14.8
+[manager]	WARNING	Test in comment: comparison is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: not is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: a is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: bind is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: LAN is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: sharing is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: is is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: the is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: documented is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: default is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: health is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: probe is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: uses is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: loopback is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: LAN is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: sharing is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: is is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: the is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: product is not a test name or id, ignoring
+[tester]	WARNING	nosec encountered (B104), but no failed test on file livepaste/cli.py:736
+[tester]	WARNING	nosec encountered (B104), but no failed test on file livepaste/cli.py:780
+[tester]	WARNING	nosec encountered (B104), but no failed test on file livepaste/cli.py:780
+[tester]	WARNING	nosec encountered (B104), but no failed test on file livepaste/cli.py:780
+[tester]	WARNING	nosec encountered (B104), but no failed test on file livepaste/cli.py:909
+[tester]	WARNING	nosec encountered (B104), but no failed test on file livepaste/cli.py:909
+Run started:2026-11-12 09:58:54.864545+00:00
+
+Test results:
+	No issues identified.
+
+Code scanned:
+	Total lines of code: 3820
+	Total lines skipped (#nosec): 0
+	Total potential issues skipped due to specifically being disabled (e.g., #nosec BXXX): 5
+
+Run metrics:
+	Total issues (by severity):
+		Undefined: 0
+		Low: 43
+		Medium: 0
+		High: 0
+	Total issues (by confidence):
+		Undefined: 0
+		Low: 0
+		Medium: 2
+		High: 41
+Files skipped (0):

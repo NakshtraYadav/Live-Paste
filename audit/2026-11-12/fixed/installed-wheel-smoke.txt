@@ -1,0 +1,1 @@
+Installed program passed: static assets, isolated runner policy, CRDT sync, viewer page reads, Unicode binary upload/download, ranges, custom-data restart and persistence.

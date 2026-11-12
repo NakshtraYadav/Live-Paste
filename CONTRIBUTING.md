@@ -5,7 +5,7 @@ development setup, conventions, and release flow.
 
 ## Development setup
 
-**Backend** (Python 3.9+):
+**Backend** (Python 3.11+):
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate

@@ -97,6 +97,8 @@ export function blocksToContent(blocks) {
   return lines.join("\n");
 }
 
+const ignoreReadOnlyChange = () => {};
+
 const isFileBlock = (b) => b.type === "image" || b.type === "file";
 
 const lineCountOf = (block) => {
@@ -209,6 +211,12 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
 
   // ---- imperative API: insert a file/image token at the current caret ----
   useImperativeHandle(ref, () => ({
+    getInsertionOffset() {
+      const focus = focusRef.current;
+      if (!focus || !blocks[focus.index] || blocks[focus.index].type !== "text") return content.length;
+      const prefix = blocksToContent(blocks.slice(0, focus.index));
+      return Math.min(content.length, prefix.length + (prefix ? 1 : 0) + (focus.sel || 0));
+    },
     insertImageToken(token) {
       const m = token.match(FILE_LINE_RE) || token.match(IMG_LINE_RE);
       if (!m) return;
@@ -269,33 +277,9 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
     (index) => {
       const blk = blocks[index];
       if (!isFileBlock(blk)) return;
-      // Merge surrounding text blocks (they always exist by construction)
-      const prev = blocks[index - 1];
-      const nextB = blocks[index + 1];
-      const mergedValue =
-        prev.value === null && nextB.value === null
-          ? null
-          : `${prev.value ?? ""}${prev.value !== null && nextB.value !== null ? "\n" : ""}${nextB.value ?? ""}`;
-      const caretPos = (prev.value ?? "").length;
-      const next = [
-        ...blocks.slice(0, index - 1),
-        { type: "text", value: mergedValue },
-        ...blocks.slice(index + 2),
-      ];
-      const newContent = blocksToContent(next);
-      onChange(newContent);
-      // If the file no longer appears anywhere, delete the stored file
-      if (
-        !newContent.includes(`/api/file/${blk.id}`) &&
-        !newContent.includes(`/api/image/${blk.id}`)
-      ) {
-        axios
-          .delete(blk.url.startsWith("http") ? blk.url : `${API_BASE}${blk.url}`)
-          .catch(() => {});
-      }
-      focusTextAt(index - 1, caretPos);
+      onDeleteImage?.(blk);
     },
-    [blocks, onChange, focusTextAt],
+    [blocks, onDeleteImage],
   );
 
   // ---- per-textarea handlers ----
@@ -808,7 +792,7 @@ const InlineBlocksEditor = forwardRef(function InlineBlocksEditor(
               {selectionOverlays(cursorMap[index] || [], block.value)}
               <Editor
                 value={block.value}
-                onValueChange={readOnly ? undefined : handleBlockChange(index)}
+                onValueChange={readOnly ? ignoreReadOnlyChange : handleBlockChange(index)}
                 highlight={(code) => highlightCode(code, language)}
                 padding={0}
                 textareaClassName="code-input"

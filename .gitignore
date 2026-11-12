@@ -98,3 +98,6 @@ credentials.json
 
 # Generated at build time by CI
 livepaste/_version.py
+
+# Alternate validation environments
+.venv-supported/

@@ -1,0 +1,13 @@
+yarn run v1.22.22
+$ vitest run --passWithNoTests audit/known-bugs.test.jsx
+
+ RUN  v2.1.9 /Users/nakshtrayadav/Documents/Development/Livepaste/frontend
+
+ ✓ audit/known-bugs.test.jsx (2 tests) 25ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  09:59:23
+   Duration  1.14s (transform 43ms, setup 116ms, collect 80ms, tests 25ms, environment 364ms, prepare 70ms)
+
+Done in 2.31s.

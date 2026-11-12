@@ -118,7 +118,9 @@ esac
 
 BINARY_URL=""
 if [[ -n "$ASSET" && "${LIVEPASTE_FORCE_PYTHON:-0}" != "1" ]]; then
-  CANDIDATE="https://github.com/$REPO/releases/latest/download/$ASSET"
+  RELEASE_TAG="$(curl -fsSL --max-time 10 "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | sed -nE 's/.*"tag_name": *"([^"]+)".*/\1/p' | head -1 || true)"
+  [[ "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]] || RELEASE_TAG=""
+  CANDIDATE="https://github.com/$REPO/releases/download/$RELEASE_TAG/$ASSET"
   if curl -fsIL --max-time 10 -o /dev/null "$CANDIDATE" 2>/dev/null; then
     BINARY_URL="$CANDIDATE"
   fi
@@ -215,6 +217,13 @@ if [[ -n "$BINARY_URL" ]]; then
   download_binary() {
     mkdir -p "$APP_DIR/bin"
     curl -fSL --progress-bar -o "$LIVEPASTE_BIN.tmp" "$BINARY_URL"
+    local sums expected actual
+    sums="$(curl -fsSL --max-time 30 "https://github.com/$REPO/releases/download/$RELEASE_TAG/SHA256SUMS")" || return 1
+    expected="$(printf '%s\n' "$sums" | awk -v name="$ASSET" '$2 == name { print $1 }')"
+    [[ "$expected" =~ ^[a-fA-F0-9]{64}$ ]] || { rm -f "$LIVEPASTE_BIN.tmp"; return 1; }
+    if command -v sha256sum >/dev/null; then actual="$(sha256sum "$LIVEPASTE_BIN.tmp" | awk '{print $1}')"
+    else actual="$(shasum -a 256 "$LIVEPASTE_BIN.tmp" | awk '{print $1}')"; fi
+    [[ "$actual" == "$expected" ]] || { rm -f "$LIVEPASTE_BIN.tmp"; return 1; }
     chmod +x "$LIVEPASTE_BIN.tmp"
     mv "$LIVEPASTE_BIN.tmp" "$LIVEPASTE_BIN"
     if [[ "$OS" == "Darwin" ]]; then
@@ -231,18 +240,18 @@ else
   LIVEPASTE_BIN="$VENV_DIR/bin/livepaste"
 
   PY=""
-  for cand in python3 python; do
-    if command -v "$cand" >/dev/null 2>&1 && "$cand" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' 2>/dev/null; then
+  for cand in python3.14 python3.13 python3.12 python3.11 python3 python; do
+    if command -v "$cand" >/dev/null 2>&1 && "$cand" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null; then
       PY="$cand"; break
     fi
   done
   if [[ -z "$PY" ]]; then
     if [[ "$OS" == "Darwin" ]] && command -v brew >/dev/null 2>&1; then
-      printf "  %s!%s Python 3.9+ not found — installing via Homebrew (this can take a minute)\n" "$YELLOW" "$RESET"
+      printf "  %s!%s Python 3.11+ not found — installing via Homebrew (this can take a minute)\n" "$YELLOW" "$RESET"
       brew install python@3.12 >/dev/null
-      PY="python3"
+      PY="$(brew --prefix python@3.12)/bin/python3.12"
     else
-      fail "Python 3.9+ is required. macOS: brew install python  |  Linux: use your package manager."
+      fail "Python 3.11+ is required. macOS: brew install python  |  Linux: use your package manager."
     fi
   fi
   printf "  %s✓%s Found %s\n" "$GREEN" "$RESET" "$($PY --version 2>&1)"

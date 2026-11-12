@@ -1,3 +1,5 @@
+import { getIdentity } from "./identity";
+const memoryTokens = new Map();
 /**
  * Edit-token store — the secret that lets a link be edited.
  *
@@ -6,20 +8,21 @@
  */
 export const editTokenStore = {
   save: (slug, token) => {
+    memoryTokens.set(slug, token);
     try {
       localStorage.setItem(`lp_edit_${slug}`, token);
-    } catch {
-      /* private mode */
-    }
+      return true;
+    } catch { return false; }
   },
   get: (slug) => {
     try {
-      return localStorage.getItem(`lp_edit_${slug}`) || "";
+      return localStorage.getItem(`lp_edit_${slug}`) || memoryTokens.get(slug) || "";
     } catch {
-      return "";
+      return memoryTokens.get(slug) || "";
     }
   },
   clear: (slug) => {
+    memoryTokens.delete(slug);
     try {
       localStorage.removeItem(`lp_edit_${slug}`);
     } catch {
@@ -34,15 +37,15 @@ export const editTokenStore = {
 export const editorCapabilityStore = {
   save: (slug, capability) => {
     try {
-      if (capability) localStorage.setItem(`lp_editor_cap_${slug}`, capability);
-      else localStorage.removeItem(`lp_editor_cap_${slug}`);
+      if (capability) localStorage.setItem(`lp_editor_cap_${slug}_${getIdentity().clientId}`, capability);
+      else localStorage.removeItem(`lp_editor_cap_${slug}_${getIdentity().clientId}`);
     } catch {
       /* private mode */
     }
   },
   get: (slug) => {
     try {
-      return localStorage.getItem(`lp_editor_cap_${slug}`) || "";
+      return localStorage.getItem(`lp_editor_cap_${slug}_${getIdentity().clientId}`) || "";
     } catch {
       return "";
     }
@@ -58,7 +61,8 @@ export const consumeEditTokenFromUrl = (slug) => {
     const hashParams = new URLSearchParams(hash);
     const t = hashParams.get("edit") || params.get("edit");
     if (t) {
-      editTokenStore.save(slug, t);
+      const stored = editTokenStore.save(slug, t);
+      if (!stored) return t;
       params.delete("edit");
       window.history.replaceState(
         {},

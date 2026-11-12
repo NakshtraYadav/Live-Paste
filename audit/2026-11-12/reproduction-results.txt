@@ -1,0 +1,16 @@
+xxxxxxxxxxxxx.                                                           [100%]
+=========================== short test summary info ============================
+XFAIL audit/2026-11-12/test_reproductions.py::test_granted_identity_does_not_disclose_capability - B01: handshake discloses a granted editor's capability to an impersonator
+XFAIL audit/2026-11-12/test_reproductions.py::test_viewer_can_request_sheet_sync_state - B03: s:open reads are included in the write-only authorization gate
+XFAIL audit/2026-11-12/test_reproductions.py::test_full_text_backup_preserves_crdt_history - B04: full-text backups erase the CRDT dependency chain
+XFAIL audit/2026-11-12/test_reproductions.py::test_rest_password_guesses_are_limited - B08: REST content reads bypass password lockout
+XFAIL audit/2026-11-12/test_reproductions.py::test_long_password_round_trips - B09: password creation silently truncates at 200 characters
+XFAIL audit/2026-11-12/test_reproductions.py::test_locked_paste_hides_sheet_names - B10: sheet names are readable without the paste password
+XFAIL audit/2026-11-12/test_reproductions.py::test_burn_counts_anonymous_reads - B11: anonymous reads increment views but never trigger burn
+XFAIL audit/2026-11-12/test_reproductions.py::test_purge_all_clears_history - B12: ephemeral purge leaves main Yjs state and revision history behind
+XFAIL audit/2026-11-12/test_reproductions.py::test_expired_socket_cannot_write_updates - B13: an admitted socket can store CRDT updates after paste expiry
+XFAIL audit/2026-11-12/test_reproductions.py::test_restart_uses_start_default_port - B14: restart defaults to port 8000 while start uses 8090
+XFAIL audit/2026-11-12/test_reproductions.py::test_restart_uses_start_default_data_dir - B14: restart switches the default storage directory to ~/.livepaste/data
+XFAIL audit/2026-11-12/test_reproductions.py::test_restart_never_kills_an_unrelated_port_user - B15: restart kills unrelated port users without checking their identity
+XFAIL audit/2026-11-12/test_reproductions.py::test_explicit_keep_data_overrides_legacy_config - B16: --keep-data is ignored when KEEP_DATA=0 is configured
+1 passed, 13 xfailed in 4.78s

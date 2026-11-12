@@ -1,4 +1,4 @@
-"""Run LivePaste automatically at login (macOS launchd / Linux systemd)."""
+"""Run LivePaste at login: launchd, systemd or a per-user Windows startup entry."""
 
 import os
 import sys
@@ -35,6 +35,8 @@ def enable() -> str:
         return _enable_macos()
     if system == "Linux":
         return _enable_linux()
+    if system == "Windows":
+        return _enable_windows()
     raise RuntimeError(f"Autostart is not supported on {system} yet.")
 
 
@@ -44,11 +46,21 @@ def disable() -> str:
         return _disable_macos()
     if system == "Linux":
         return _disable_linux()
+    if system == "Windows":
+        return _disable_windows()
     raise RuntimeError(f"Autostart is not supported on {system} yet.")
 
 
 def status() -> str:
     system = platform.system()
+    if system == "Windows":
+        import winreg
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _WINDOWS_RUN) as key:
+                value, _kind = winreg.QueryValueEx(key, "LivePaste")
+            return "enabled" if value == _windows_run_command() and _windows_launcher().exists() else "disabled"
+        except FileNotFoundError:
+            return "disabled"
     if system == "Darwin":
         if not _plist_path().exists():
             return "disabled"
@@ -71,6 +83,42 @@ def status() -> str:
         except Exception:
             return "enabled"
     return "unsupported"
+
+
+_WINDOWS_RUN = r"Software\Microsoft\Windows\CurrentVersion\Run"
+
+
+def _windows_launcher():
+    return Path.home() / ".livepaste" / "launch.vbs"
+
+
+def _windows_run_command():
+    # Native paths and list2cmdline preserve spaces and non-ASCII user names.
+    script_host = str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "wscript.exe")
+    return subprocess.list2cmdline([script_host, "//B", "//Nologo", str(_windows_launcher())])
+
+
+def _enable_windows():
+    import winreg
+    from .cli import _command
+    command = subprocess.list2cmdline(_command() + ["background"])
+    path = _windows_launcher()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('Set shell = CreateObject("WScript.Shell")\nshell.Run "' + command.replace('"', '""') + '", 0, False\n', encoding="utf-16")
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _WINDOWS_RUN) as key:
+        winreg.SetValueEx(key, "LivePaste", 0, winreg.REG_SZ, _windows_run_command())
+    return "Windows sign-in startup enabled for your account. Run livepaste background to start now."
+
+
+def _disable_windows():
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _WINDOWS_RUN, 0, winreg.KEY_SET_VALUE) as key:
+            winreg.DeleteValue(key, "LivePaste")
+    except FileNotFoundError:
+        pass
+    _windows_launcher().unlink(missing_ok=True)
+    return "Windows sign-in startup disabled. Use livepaste stop to stop the current server."
 
 
 # ----------------------------- macOS (launchd) -----------------------------

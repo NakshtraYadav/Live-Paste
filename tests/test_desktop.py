@@ -1,0 +1,114 @@
+"""Windows lifecycle boundaries; real runtime tests also run on Windows CI."""
+import json
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+import pytest
+
+from livepaste import autostart, cli, desktop
+
+
+def test_windows_release_asset(monkeypatch):
+    monkeypatch.setattr(cli.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(cli.platform, "machine", lambda: "AMD64")
+    assert cli.binary_asset_name() == "livepaste-windows-x86_64.exe"
+
+
+@pytest.mark.parametrize("command,expected", [
+    ('"C:\\Program Files\\LivePaste\\livepaste.exe" start --keep-data', True),
+    ('"C:\\Users\\Test User\\python.exe" -m livepaste start', True),
+    ('"C:\\Users\\Test User\\python.exe" -m otherapp start', False),
+    ('"C:\\Program Files\\other.exe" start', False),
+])
+def test_windows_process_identity(monkeypatch, command, expected):
+    monkeypatch.setattr(cli, "_is_windows", lambda: True)
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout=command))
+    assert cli._pid_is_livepaste(12345) is expected
+
+
+def test_windows_stop_uses_authenticated_local_control_not_terminate(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "_is_windows", lambda: True)
+    monkeypatch.setattr(cli, "PID_PATH", str(tmp_path / "livepaste.pid"))
+    monkeypatch.setattr(cli, "_pid_is_livepaste", lambda pid: True)
+    stamps = iter(["created", ""])
+    monkeypatch.setattr(cli, "_process_started", lambda pid: next(stamps))
+    kill = Mock()
+    monkeypatch.setattr(cli.os, "kill", kill)
+    atomic = Mock(wraps=cli._atomic_json)
+    monkeypatch.setattr(cli, "_atomic_json", atomic)
+    cli._stop_launch({"pid": 12345, "process_started": "created", "control_token": "private-control"})
+    atomic.assert_called_once_with(str(tmp_path / "livepaste.pid.12345.stop"), {"token": "private-control"})
+    kill.assert_not_called()
+
+
+def test_stale_process_record_cannot_stop_reused_pid(monkeypatch):
+    monkeypatch.setattr(cli, "_pid_is_livepaste", lambda pid: True)
+    monkeypatch.setattr(cli, "_process_started", lambda pid: "other-process")
+    kill = Mock()
+    monkeypatch.setattr(cli.os, "kill", kill)
+    cli._stop_launch({"pid": 12345, "process_started": "old-process"})
+    kill.assert_not_called()
+
+
+def test_duplicate_background_launch_reuses_monitor(monkeypatch):
+    monkeypatch.setattr(desktop, "_read", lambda path: {"pid": 12345})
+    monkeypatch.setattr(desktop, "_alive", lambda record: True)
+    monkeypatch.setattr(desktop, "wait_ready", lambda: {})
+    popen = Mock()
+    monkeypatch.setattr(desktop.subprocess, "Popen", popen)
+    monkeypatch.setattr(desktop.webbrowser, "open", Mock())
+    desktop.command_background(SimpleNamespace(worker=False, open=True))
+    popen.assert_not_called()
+    desktop.webbrowser.open.assert_called_once()
+
+
+def test_windows_update_launches_verified_installer_instead_of_swapping_running_exe(monkeypatch, tmp_path):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(cli, "fetch_release_asset", lambda asset, tag: b"installer")
+    checks = Mock(return_value=True)
+    monkeypatch.setattr(cli, "verify_checksum", checks)
+    monkeypatch.setattr(cli, "_child_options", lambda: {})
+    popen = Mock()
+    monkeypatch.setattr(cli.subprocess, "Popen", popen)
+    cli._update_windows("v4.0.0")
+    checks.assert_called_once_with(b"installer", "livepaste-windows-x86_64-setup.exe", tag="v4.0.0")
+    assert Path(popen.call_args.args[0][0]).read_bytes() == b"installer"
+
+
+def test_windows_update_rejects_missing_or_wrong_checksum(monkeypatch, tmp_path):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(cli, "fetch_release_asset", lambda asset, tag: b"tampered")
+    monkeypatch.setattr(cli, "verify_checksum", lambda *a, **k: False)
+    popen = Mock()
+    monkeypatch.setattr(cli.subprocess, "Popen", popen)
+    with pytest.raises(SystemExit): cli._update_windows("v4.0.0")
+    popen.assert_not_called()
+
+
+def test_windows_login_launcher_quotes_paths_and_registers_current_user_only(monkeypatch, tmp_path):
+    import sys
+    from contextlib import nullcontext
+    registry = {}
+    class Registry:
+        HKEY_CURRENT_USER = "current-user"
+        KEY_SET_VALUE = 2
+        REG_SZ = 1
+        def CreateKey(self, root, path):
+            assert root == self.HKEY_CURRENT_USER
+            return nullcontext(path)
+        def OpenKey(self, *args): return self.CreateKey(*args[:2])
+        def SetValueEx(self, key, name, reserved, kind, value): registry[name] = (value, kind)
+        def QueryValueEx(self, key, name): return registry[name]
+        def DeleteValue(self, key, name): registry.pop(name)
+    monkeypatch.setitem(sys.modules, "winreg", Registry())
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "Test User 报告")
+    monkeypatch.setattr(cli, "_command", lambda: [r"C:\Program Files\LivePaste\livepaste.exe"])
+    monkeypatch.setattr(autostart.platform, "system", lambda: "Windows")
+    autostart.enable()
+    script = autostart._windows_launcher().read_text(encoding="utf-16")
+    assert '""C:\\Program Files\\LivePaste\\livepaste.exe"" background' in script
+    assert "launch.vbs" in registry["LivePaste"][0]
+    assert autostart.status() == "enabled"
+    autostart.disable()
+    assert not registry and not autostart._windows_launcher().exists()

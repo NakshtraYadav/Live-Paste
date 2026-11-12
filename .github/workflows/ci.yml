@@ -1,27 +1,51 @@
 name: CI
 
 on:
+  workflow_call:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      matrix:
+        python: ["3.11", "3.14"]
+        os: [ubuntu-latest, windows-2025]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
 
       - name: Install backend + test deps
         run: |
           python -m pip install --upgrade pip
-          pip install -e . pytest httpx
+          pip install -e . pytest httpx build
 
       - name: Run offline test suite
         env:
           LIVEPASTE_DATA_DIR: ${{ runner.temp }}/lp-ci-data
           LIVEPASTE_SERVE_STATIC: "0"
         run: pytest tests/ -q --tb=short
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+      - name: Install and test frontend
+        run: |
+          corepack enable
+          yarn --cwd frontend install --frozen-lockfile
+          yarn --cwd frontend test
+          yarn --cwd frontend build
+          python scripts/check_bundle.py
+      - name: Verify installed package
+        run: python scripts/check_wheel.py

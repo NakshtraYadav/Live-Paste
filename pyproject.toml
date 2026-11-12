@@ -6,18 +6,24 @@ build-backend = "setuptools.build_meta"
 name = "livepaste"
 description = "Share text & code on your local network in real time \u2014 collaborative pastebin with inline images."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 dynamic = ["version"]
 dependencies = [
-    "fastapi>=0.110",
-    "uvicorn>=0.25",
-    "websockets>=12",
-    "python-multipart>=0.0.9",
+    "fastapi>=0.162.5,<0.163",
+    "starlette>=1.10,<2",
+    "anyio>=4.14.2,<5",
+    "uvicorn>=0.54,<0.55",
+    "websockets>=17.4,<18",
+    "python-multipart>=0.0.33,<0.1",
     "aiosqlite>=0.20",
-    "pydantic>=2",
+    "pydantic>=2.13.5,<3",
     "redis>=5.0",
+    "pycrdt>=0.14.13,<0.15",
 ]
+
+[project.optional-dependencies]
+mongo = ["motor>=3.7,<4", "pymongo>=4.9,<5"]
 
 [project.scripts]
 livepaste = "livepaste.cli:main"

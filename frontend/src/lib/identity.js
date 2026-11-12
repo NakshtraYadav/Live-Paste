@@ -57,7 +57,14 @@ export function getIdentity() {
     return { clientId: "unknown", name: "Guest", color: PEER_COLORS[0], initials: "G" };
   }
   if (!window.__lpIdentity) {
-    const clientId = randomId();
+    let clientId;
+    try {
+      clientId = window.sessionStorage.getItem("lp_client_id");
+      if (!/^[a-f0-9]{16}$/.test(clientId || "")) {
+        clientId = randomId();
+        window.sessionStorage.setItem("lp_client_id", clientId);
+      }
+    } catch { clientId = randomId(); }
     const n = parseInt(clientId.slice(0, 6), 16);
     let name = null;
     try {

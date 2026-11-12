@@ -10,8 +10,10 @@ Both expose the same async interface consumed by livepaste.core.
 
 import os
 import uuid
+import secrets
 import asyncio
 import logging
+from pycrdt import merge_updates
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -102,6 +104,7 @@ class MongoStorage:
             "burnAfterViews": doc.get("burnAfterViews"),
             "passwordHash": doc.get("passwordHash"),
             "burnedBy": doc.get("burnedBy") or [],
+            "p2pKey": doc.get("p2pKey"),
         }
 
     async def slug_exists(self, slug: str) -> bool:
@@ -120,12 +123,13 @@ class MongoStorage:
         await self.db.ystate.delete_one({"slug": slug})
         await self.db.sheets.delete_many({"slug": slug})
         await self.db.ystate_sheets.delete_many({"slug": slug})
+        await self.db.document_recovery.delete_many({"slug": slug})
 
     async def update_editors(self, slug: str, editors: list):
         """Replace the per-user edit-permission allowlist (v3.3.0)."""
         clean = [str(e)[:64] for e in editors if e][:200]
         await self.db.pastes.update_one(
-            {"slug": slug}, {"$set": {"editors": clean}}
+            {"slug": slug}, {"$set": {"editors": clean, "p2pKey": secrets.token_urlsafe(32)}}
         )
 
     async def increment_views(self, slug: str):
@@ -162,7 +166,7 @@ class MongoStorage:
             "views": doc.get("views", 0) + (1 if is_new_viewer else 0),
             "burnAfterViews": burn_after,
             "burners": len(burners),
-            "shouldBurn": bool(burn_after and len(burners) >= burn_after),
+            "shouldBurn": bool(burn_after and (doc.get("views", 0) + (1 if is_new_viewer else 0)) >= burn_after),
         }
 
     async def update_password(self, slug: str, password_hash):
@@ -406,9 +410,10 @@ class MongoStorage:
     async def append_sheet_yupdate(self, slug: str, sheet_id: str, update: bytes):
         await self.db.ystate_sheets.update_one(
             {"slug": slug, "sheetId": sheet_id},
-            {"$push": {"updates": {"$each": [update], "$slice": -1000}}},
+            {"$push": {"updates": update}},
             upsert=True,
         )
+        await self._compact_updates(self.db.ystate_sheets, {"slug": slug, "sheetId": sheet_id})
 
     async def clear_sheet_ystate(self, slug: str, sheet_id: str):
         await self.db.ystate_sheets.delete_one({"slug": slug, "sheetId": sheet_id})
@@ -453,6 +458,9 @@ class MongoStorage:
         snaps = (doc or {}).get("snapshots", [])
         return snaps[0] if snaps else None
 
+    async def archive_document(self, slug, sheet_id, updates):
+        await self.db.document_recovery.insert_one({"slug": slug, "sheetId": sheet_id, "updates": updates, "createdAt": now_utc()})
+
     # ---- CRDT (Yjs) state: ordered list of composable updates ----
     MAX_YUPDATES_STORED = 1000
 
@@ -463,9 +471,18 @@ class MongoStorage:
     async def append_yupdate(self, slug: str, update: bytes):
         await self.db.ystate.update_one(
             {"slug": slug},
-            {"$push": {"updates": {"$each": [update], "$slice": -self.MAX_YUPDATES_STORED}}},
+            {"$push": {"updates": update}},
             upsert=True,
         )
+        await self._compact_updates(self.db.ystate, {"slug": slug})
+
+    async def _compact_updates(self, collection, key):
+        doc = await collection.find_one(key)
+        updates = (doc or {}).get("updates", [])
+        if len(updates) >= self.MAX_YUPDATES_STORED:
+            # Compare-and-swap: an append on another worker must never be lost.
+            merged = merge_updates(*updates)
+            await collection.update_one({**key, "updates": updates}, {"$set": {"updates": [merged]}})
 
     async def clear_ystate(self, slug: str):
         await self.db.ystate.delete_one({"slug": slug})
@@ -518,6 +535,7 @@ class SQLiteStorage:
             ("password_hash", "ALTER TABLE pastes ADD COLUMN password_hash TEXT"),
             ("burned_by", "ALTER TABLE pastes ADD COLUMN burned_by TEXT"),
             ("editors", "ALTER TABLE pastes ADD COLUMN editors TEXT"),
+            ("p2p_key", "ALTER TABLE pastes ADD COLUMN p2p_key TEXT"),
             ("viewers", "ALTER TABLE pastes ADD COLUMN viewers TEXT"),  # v3.15.1: unique-viewer counting
         ):
             try:
@@ -572,6 +590,7 @@ class SQLiteStorage:
                 PRIMARY KEY (slug, sheet_id, idx)
             )"""
         )
+        await self._conn.execute("CREATE TABLE IF NOT EXISTS document_recovery (slug TEXT, sheet_id TEXT, payload BLOB, created_at TEXT)")
         # Migrations for databases created before v2.0
         cur = await self._conn.execute("PRAGMA table_info(pastes)")
         cols = {row[1] for row in await cur.fetchall()}
@@ -603,6 +622,7 @@ class SQLiteStorage:
             "expiresAt": row["expires_at"],
             "rev": row["rev"],
             "editToken": row["edit_token"],
+            "p2pKey": row["p2p_key"],
             "editors": (row["editors"] or "").split(",") if row["editors"] else [],
             "burnAfterViews": row["burn_after_views"],
             "passwordHash": row["password_hash"],
@@ -614,8 +634,8 @@ class SQLiteStorage:
         clean = [str(e)[:64] for e in editors if e][:200]
         async with self._lock:
             await self._conn.execute(
-                "UPDATE pastes SET editors = ? WHERE slug = ?",
-                (",".join(clean), slug),
+                "UPDATE pastes SET editors = ?, p2p_key = ? WHERE slug = ?",
+                (",".join(clean), secrets.token_urlsafe(32), slug),
             )
             await self._conn.commit()
 
@@ -651,6 +671,7 @@ class SQLiteStorage:
         async with self._lock:
             await self._conn.execute("DELETE FROM pastes WHERE slug = ?", (slug,))
             await self._conn.execute("DELETE FROM revisions WHERE slug = ?", (slug,))
+            await self._conn.execute("DELETE FROM document_recovery WHERE slug = ?", (slug,))
             await self._conn.execute("DELETE FROM ystate WHERE slug = ?", (slug,))
             await self._conn.execute("DELETE FROM sheets WHERE slug = ?", (slug,))
             await self._conn.execute("DELETE FROM ystate_sheets WHERE slug = ?", (slug,))
@@ -706,7 +727,7 @@ class SQLiteStorage:
                 "views": row["views"] + (1 if is_new_viewer else 0),
                 "burnAfterViews": burn_after,
                 "burners": len(burners),
-                "shouldBurn": bool(burn_after and len(burners) >= burn_after),
+                "shouldBurn": bool(burn_after and (row["views"] + (1 if is_new_viewer else 0)) >= burn_after),
             }
 
     async def update_password(self, slug: str, password_hash):
@@ -901,6 +922,13 @@ class SQLiteStorage:
             row = await cur.fetchone()
         return dict(row) if row else None
 
+    async def archive_document(self, slug, sheet_id, updates):
+        import json, base64
+        payload = json.dumps([base64.b64encode(update).decode() for update in updates])
+        async with self._lock:
+            await self._conn.execute("INSERT INTO document_recovery VALUES (?, ?, ?, ?)", (slug, sheet_id, payload, now_utc().isoformat()))
+            await self._conn.commit()
+
     # ---- CRDT (Yjs) state: ordered list of composable updates ----
     # Each stored blob is ONE valid Yjs update. Clients apply them in order —
     # Yjs updates are commutative, so ordered replay converges without needing
@@ -921,14 +949,12 @@ class SQLiteStorage:
             )
             idx = (await cur.fetchone())[0]
             if idx >= self.MAX_YUPDATES_STORED:
-                # Compact: drop the oldest half (clients recover via full sync)
+                cur = await self._conn.execute('SELECT "update" FROM ystate WHERE slug = ? ORDER BY idx', (slug,))
+                update = merge_updates(*[r[0] for r in await cur.fetchall()], update)
                 await self._conn.execute(
-                    "DELETE FROM ystate WHERE slug = ? AND idx < ?", (slug, idx // 2)
+                    "DELETE FROM ystate WHERE slug = ?", (slug,)
                 )
-                cur = await self._conn.execute(
-                    "SELECT COALESCE(MAX(idx), -1) + 1 FROM ystate WHERE slug = ?", (slug,)
-                )
-                idx = (await cur.fetchone())[0]
+                idx = 0
             await self._conn.execute(
                 'INSERT INTO ystate (slug, idx, "update") VALUES (?, ?, ?)', (slug, idx, update)
             )
@@ -1044,15 +1070,13 @@ class SQLiteStorage:
             )
             idx = (await cur.fetchone())[0]
             if idx >= self.MAX_YUPDATES_STORED:
+                cur = await self._conn.execute('SELECT "update" FROM ystate_sheets WHERE slug = ? AND sheet_id = ? ORDER BY idx', (slug, sheet_id))
+                update = merge_updates(*[r[0] for r in await cur.fetchall()], update)
                 await self._conn.execute(
-                    "DELETE FROM ystate_sheets WHERE slug = ? AND sheet_id = ? AND idx < ?",
-                    (slug, sheet_id, idx // 2),
-                )
-                cur = await self._conn.execute(
-                    "SELECT COALESCE(MAX(idx), -1) + 1 FROM ystate_sheets WHERE slug = ? AND sheet_id = ?",
+                    "DELETE FROM ystate_sheets WHERE slug = ? AND sheet_id = ?",
                     (slug, sheet_id),
                 )
-                idx = (await cur.fetchone())[0]
+                idx = 0
             await self._conn.execute(
                 'INSERT INTO ystate_sheets (slug, sheet_id, idx, "update") VALUES (?, ?, ?, ?)',
                 (slug, sheet_id, idx, update),
@@ -1103,6 +1127,9 @@ class SQLiteStorage:
             await self._conn.execute("DELETE FROM images")
             await self._conn.execute("DELETE FROM sheets")
             await self._conn.execute("DELETE FROM ystate_sheets")
+            await self._conn.execute("DELETE FROM ystate")
+            await self._conn.execute("DELETE FROM revisions")
+            await self._conn.execute("DELETE FROM document_recovery")
             await self._conn.commit()
         removed = 0
         try:

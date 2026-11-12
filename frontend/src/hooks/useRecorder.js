@@ -66,13 +66,13 @@ export function useRecorder({ onComplete }) {
       chunksRef.current = [];
       // iOS Safari can't produce webm — it records AAC in an MP4 container;
       // Firefox mobile offers ogg/opus. Pick the first the browser supports.
-      const mimeCandidates = [
+      const mimeCandidates = kind === "screen" ? [
+        "video/webm;codecs=vp8,opus", "video/webm", "video/mp4",
+      ] : [
         "audio/webm;codecs=opus",
         "audio/webm",
         "audio/mp4", // iOS Safari
         "audio/ogg;codecs=opus", // Firefox
-        "video/webm;codecs=vp8,opus",
-        "video/webm",
       ];
       const mimeType = mimeCandidates.find((m) => {
         try {
@@ -111,7 +111,11 @@ export function useRecorder({ onComplete }) {
         if (recorderRef.current === rec && rec.state !== "inactive") rec.stop();
       };
       for (const track of stream.getTracks()) track.addEventListener("ended", onTrackEnded);
-      rec.start(1000); // 1s chunks keep memory flat on long notes
+      try { rec.start(1000); } catch {
+        recorderRef.current = null;
+        stopStream();
+        return "unsupported";
+      }
       setRecording(kind);
       setSeconds(0);
       timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
