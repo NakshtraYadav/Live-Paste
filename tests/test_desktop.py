@@ -17,6 +17,8 @@ def test_windows_release_asset(monkeypatch):
 
 @pytest.mark.parametrize("command,expected", [
     ('"C:\\Program Files\\LivePaste\\livepaste.exe" start --keep-data', True),
+    ('"C:\\Downloads\\livepaste-windows-x86_64.exe" start --keep-data', True),
+    ('/Downloads/livepaste-macos-arm64 start', True),
     ('"C:\\Users\\Test User\\python.exe" -m livepaste start', True),
     ('"C:\\Users\\Test User\\python.exe" -m otherapp start', False),
     ('"C:\\Program Files\\other.exe" start', False),

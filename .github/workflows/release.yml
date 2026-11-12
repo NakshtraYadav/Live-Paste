@@ -84,14 +84,9 @@ jobs:
         run: |
           BINARY=./dist/livepaste
           if [ "${{ runner.os }}" = "Windows" ]; then BINARY=./dist/livepaste.exe; fi
-          python scripts/smoke_install.py --binary "$BINARY"
-          python scripts/smoke_background.py --binary "$BINARY"
-
-      - name: Rename asset
-        run: |
-          BINARY=dist/livepaste
-          if [ "${{ runner.os }}" = "Windows" ]; then BINARY=dist/livepaste.exe; fi
           mv "$BINARY" dist/${{ matrix.asset }}
+          python scripts/smoke_install.py --binary dist/${{ matrix.asset }}
+          python scripts/smoke_background.py --binary dist/${{ matrix.asset }}
 
       - name: Build one-click Windows installer
         if: runner.os == 'Windows'

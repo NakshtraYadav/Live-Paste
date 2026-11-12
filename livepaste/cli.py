@@ -802,7 +802,10 @@ def _pid_is_livepaste(pid):
             args = shlex.split(command)
         module = args[args.index("-m") + 1] if "-m" in args else ""
         import ntpath
-        return (module == "livepaste" and "start" in args) or (module == "uvicorn" and "livepaste.core:app" in args) or (bool(args) and any(ntpath.basename(arg).lower() in ("livepaste", "livepaste.exe") for arg in args[:2]) and "start" in args)
+        names = {"livepaste", "livepaste.exe", "livepaste-windows-x86_64.exe"}
+        names.update(f"livepaste-{system}-{arch}" for system in ("macos", "linux") for arch in ("arm64", "x86_64"))
+        if is_frozen(): names.add(ntpath.basename(sys.executable).lower())
+        return (module == "livepaste" and "start" in args) or (module == "uvicorn" and "livepaste.core:app" in args) or (bool(args) and any(ntpath.basename(arg).lower() in names for arg in args[:2]) and "start" in args)
     except (ValueError, IndexError, OSError):
         return False
 
