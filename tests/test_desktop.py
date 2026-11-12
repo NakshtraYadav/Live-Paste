@@ -51,6 +51,26 @@ def test_stale_process_record_cannot_stop_reused_pid(monkeypatch):
     kill.assert_not_called()
 
 
+def test_windows_restart_does_not_probe_stopped_pid_with_posix_signals(monkeypatch, tmp_path):
+    from contextlib import nullcontext
+    launch = {"pid":12345,"process_started":"created","host":"127.0.0.1","port":8090,"data_dir":str(tmp_path)}
+    monkeypatch.setattr(cli,"_is_windows",lambda:True)
+    monkeypatch.setattr(cli,"_read_launch",lambda port=None:launch)
+    monkeypatch.setattr(cli,"_pid_is_livepaste",lambda pid:True)
+    monkeypatch.setattr(cli,"_process_started",lambda pid:"created")
+    monkeypatch.setattr(cli,"_stop_launch",Mock())
+    monkeypatch.setattr(cli,"SERVER_LOG",str(tmp_path/"server.log"))
+    monkeypatch.setattr(cli,"read_config",lambda:{})
+    monkeypatch.setattr(cli,"is_frozen",lambda:False)
+    monkeypatch.setattr(cli,"pop_pending_restart",lambda:None)
+    monkeypatch.setattr(cli,"_safe_urlopen",lambda *a,**k:nullcontext(SimpleNamespace(status=200)))
+    monkeypatch.setattr(cli.subprocess,"Popen",Mock(return_value=SimpleNamespace(pid=98765,poll=lambda:None)))
+    kill=Mock()
+    monkeypatch.setattr(cli.os,"kill",kill)
+    cli.cmd_restart(SimpleNamespace(port=None))
+    kill.assert_not_called()
+
+
 def test_duplicate_background_launch_reuses_monitor(monkeypatch):
     monkeypatch.setattr(desktop, "_read", lambda path: {"pid": 12345})
     monkeypatch.setattr(desktop, "_alive", lambda record: True)

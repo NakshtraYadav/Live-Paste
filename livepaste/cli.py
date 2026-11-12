@@ -884,13 +884,13 @@ def cmd_restart(args):
                 return
         else:
             os.kill(pid, signal.SIGTERM)
-        for _ in range(50):
-            try: os.kill(pid, 0)
-            except OSError: break
-            if not _pid_is_livepaste(pid): break
-            time.sleep(0.1)
-        else:
-            raise SystemExit("The server did not stop; no new process was started.")
+            for _ in range(50):
+                try: os.kill(pid, 0)
+                except OSError: break
+                if not _pid_is_livepaste(pid): break
+                time.sleep(0.1)
+            else:
+                raise SystemExit("The server did not stop; no new process was started.")
     else:
         # No ownership evidence: never terminate a process just because it uses
         # a port. A pending update may start an otherwise stopped server.
